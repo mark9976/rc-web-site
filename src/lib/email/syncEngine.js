@@ -6,6 +6,8 @@ import {
   getMailboxCredentials,
   insertMessage,
   highestUid,
+  recordHighestUid,
+  isTombstoned,
   recordSyncResult,
 } from '@/lib/email/emailStore';
 
@@ -112,11 +114,23 @@ async function syncFolder(client, { mailboxId, remotePath, localFolder }) {
           uid: message.uid,
           seen: message.flags?.has('\\Seen'),
         });
+
+        // Something the admin deleted here must not reappear, even if the copy
+        // on the server outlived the delete.
+        if (isTombstoned(mailboxId, row.message_id)) {
+          recordHighestUid(mailboxId, localFolder, message.uid);
+          continue;
+        }
+
         if (insertMessage(row, toAttachments(parsed))) stored += 1;
       } catch (parseError) {
         // One malformed message must not abort the whole folder.
         console.error(`[email] failed to parse uid ${message.uid} in ${remotePath}:`, parseError.message);
       }
+
+      // Advance the mark for every UID seen, including ones we skipped, so a
+      // message that fails to parse is not retried forever.
+      recordHighestUid(mailboxId, localFolder, message.uid);
     }
   } finally {
     lock.release();
@@ -156,6 +170,50 @@ export async function syncMailbox(mailboxId) {
     return { ok: false, error: message };
   } finally {
     inFlight.delete(mailboxId);
+  }
+}
+
+/**
+ * Removes a message from the IMAP server.
+ *
+ * Without this the message survives on the server, so it stays visible in any
+ * other mail client and can be pulled back by a later sync. Best-effort: the
+ * local tombstone already guarantees it stays gone from this UI, so a failure
+ * here is logged rather than surfaced as an error.
+ */
+export async function deleteOnServer(target) {
+  // A message we only hold locally (a draft, or our own copy of a sent mail)
+  // has no UID on the server side worth chasing.
+  if (!target?.uid || !target.mailbox_id) return { ok: false, reason: 'No server copy to delete.' };
+
+  try {
+    // Inside the try: decrypting the stored password can throw, and that must
+    // not turn an already-successful local delete into a failed request.
+    const credentials = getMailboxCredentials(target.mailbox_id);
+    if (!credentials) return { ok: false, reason: 'Mailbox not found.' };
+
+    return await withImap(credentials, async (client) => {
+      const folders = await resolveFolders(client);
+      const remotePath = target.folder === 'Sent' ? folders.Sent : 'INBOX';
+      if (!remotePath) return { ok: false, reason: 'Folder not found on server.' };
+
+      const lock = await client.getMailboxLock(remotePath);
+      try {
+        // Prefer moving to the server's Trash so it is recoverable there;
+        // fall back to a flag-and-expunge if the server has no Trash folder.
+        if (folders.Trash && target.folder !== 'Trash') {
+          await client.messageMove(String(target.uid), folders.Trash, { uid: true });
+        } else {
+          await client.messageDelete(String(target.uid), { uid: true });
+        }
+        return { ok: true };
+      } finally {
+        lock.release();
+      }
+    });
+  } catch (error) {
+    console.error(`[email] could not delete uid ${target.uid} on the server:`, error.message);
+    return { ok: false, reason: error.message };
   }
 }
 

@@ -31,8 +31,12 @@
     @apply bg-flyday-nogo/10 border-2 border-flyday-nogo text-flyday-nogo;
   }
 
+  /* whitespace-nowrap matters: two-word items like "Our Fields" otherwise wrap
+     onto a second line and break the bar's height. Type and letter-spacing
+     scale up on wider screens so the full set of tabs fits at 1280px. */
   .nav-link {
-    @apply text-white/80 hover:text-white transition-colors duration-150 text-sm font-medium tracking-wide uppercase;
+    @apply text-white/80 hover:text-white transition-colors duration-150 font-medium uppercase whitespace-nowrap
+           text-[13px] tracking-normal 2xl:text-sm 2xl:tracking-wide;
   }
 
   .nav-link-active {

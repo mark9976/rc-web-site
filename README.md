@@ -191,6 +191,21 @@ polled every 60 seconds from `GET /api/email/unread-count`.
   240/hour ceiling, to stay inside GoDaddy's limits.
 - **Every `/api/email/*` route is admin-only** (`requireAdmin` via `src/lib/email/routeHelpers.js`).
 
+### How deletion works
+
+Deleting has to survive the next sync, which takes three things working together:
+
+1. **The IMAP high-water mark lives in `email_sync_state`, not in `MAX(uid)` of the stored rows.**
+   Deriving it from the rows meant deleting the newest message rewound the mark and the next sync
+   re-downloaded everything after it.
+2. **The delete is pushed to the IMAP server** (moved to the server's Trash, or flagged and expunged
+   if it has none). Otherwise the message stays on the server, visible in every other mail client.
+3. **A tombstone is written to `email_deleted_messages`.** If the server-side delete fails — offline,
+   permission denied — the local tombstone still stops the message being re-inserted.
+
+A failed server-side delete does **not** fail the request: the local delete has already happened, so
+the response returns `serverDeleted: false` with the reason rather than an error.
+
 ### Storage
 
 Email uses **its own SQLite file**, separate from `photos.db`: message bodies and attachments grow

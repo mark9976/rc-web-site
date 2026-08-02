@@ -62,6 +62,31 @@ CREATE INDEX IF NOT EXISTS idx_email_messages_thread
 CREATE INDEX IF NOT EXISTS idx_email_messages_uid
   ON email_messages(mailbox_id, folder, uid);
 
+-- Per-folder IMAP high-water mark.
+--
+-- Deliberately NOT derived from MAX(uid) in email_messages: deleting or moving
+-- a message would rewind the mark and the next sync would re-download (and
+-- resurrect) everything above it. This only ever moves forward.
+CREATE TABLE IF NOT EXISTS email_sync_state (
+  mailbox_id INTEGER NOT NULL REFERENCES email_mailboxes(id) ON DELETE CASCADE,
+  folder TEXT NOT NULL,
+  last_uid INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (mailbox_id, folder)
+);
+
+-- Tombstones for messages deleted locally.
+--
+-- Belt and braces: deletion is also pushed to the IMAP server, but if that
+-- fails (offline, permission denied) the server still holds the message and a
+-- later sync would pull it back. This makes deletion stick regardless.
+CREATE TABLE IF NOT EXISTS email_deleted_messages (
+  mailbox_id INTEGER NOT NULL REFERENCES email_mailboxes(id) ON DELETE CASCADE,
+  message_id TEXT NOT NULL,
+  deleted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (mailbox_id, message_id)
+);
+
 CREATE TABLE IF NOT EXISTS email_attachments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   message_id INTEGER NOT NULL REFERENCES email_messages(id) ON DELETE CASCADE,

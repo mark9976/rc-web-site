@@ -38,7 +38,35 @@ export function setupEmailDb() {
   const schemaPath = path.join(process.cwd(), 'src', 'lib', 'email', 'emailSchema.sql');
   db.exec(fs.readFileSync(schemaPath, 'utf8'));
 
+  seedSyncState(db);
   return db;
+}
+
+/**
+ * Back-fills the sync watermark for a database that synced before
+ * email_sync_state existed.
+ *
+ * Without this those installs would read a watermark of 0 and re-download 90
+ * days of mail on the next run. Seeding from the rows on hand is only safe here
+ * — at this point nothing has been deleted since the table was introduced.
+ */
+function seedSyncState(database) {
+  const alreadySeeded = database.prepare('SELECT COUNT(*) AS c FROM email_sync_state').get().c > 0;
+  if (alreadySeeded) return;
+
+  const marks = database
+    .prepare('SELECT mailbox_id, folder, MAX(uid) AS last_uid FROM email_messages WHERE uid IS NOT NULL GROUP BY mailbox_id, folder')
+    .all();
+  if (marks.length === 0) return;
+
+  const insert = database.prepare(
+    'INSERT OR IGNORE INTO email_sync_state (mailbox_id, folder, last_uid) VALUES (?, ?, ?)'
+  );
+  database.transaction(() => {
+    for (const mark of marks) insert.run(mark.mailbox_id, mark.folder, mark.last_uid);
+  })();
+
+  console.log(`[email] seeded sync watermarks for ${marks.length} mailbox/folder pair(s)`);
 }
 
 /** Every email helper goes through this so the schema is always present. */

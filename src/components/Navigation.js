@@ -75,8 +75,9 @@ export default function Navigation() {
             </div>
           </Link>
 
-          {/* Desktop nav */}
-          <div className="hidden lg:flex items-center gap-6">
+          {/* Desktop nav — full bar only from xl up; twelve tabs are too many
+              to fit at lg without wrapping, so those widths get the menu. */}
+          <div className="hidden xl:flex items-center gap-3 2xl:gap-5">
             {navLinks.map((link) => (
               <Link key={link.href} href={link.href} className="nav-link">
                 {link.label}
@@ -119,7 +120,7 @@ export default function Navigation() {
 
           {/* Mobile toggle */}
           <button
-            className="lg:hidden text-white p-2"
+            className="xl:hidden text-white p-2"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Toggle menu"
           >
@@ -130,7 +131,7 @@ export default function Navigation() {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="lg:hidden bg-field-darkgreen border-t border-white/10 pb-4">
+        <div className="xl:hidden bg-field-darkgreen border-t border-white/10 pb-4">
           <div className="px-4 pt-2 space-y-1">
             {navLinks.map((link) => (
               <Link

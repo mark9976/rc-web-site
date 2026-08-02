@@ -181,18 +181,32 @@ export function updateMessageFlags(id, { is_read, is_starred }) {
 }
 
 /** First delete moves to Trash; deleting from Trash removes it for good. */
+/**
+ * First delete moves to Trash; deleting from Trash removes it for good.
+ *
+ * Either way the message is tombstoned and the caller is handed the details
+ * needed to remove it from the IMAP server — without that, the copy on the
+ * server survives and a later sync brings it straight back.
+ */
 export function deleteMessage(id) {
   const db = emailDb();
-  const row = db.prepare('SELECT folder FROM email_messages WHERE id = ?').get(id);
+  const row = db
+    .prepare('SELECT id, mailbox_id, message_id, uid, folder FROM email_messages WHERE id = ?')
+    .get(id);
   if (!row) return { deleted: false };
 
-  if (row.folder === 'Trash') {
-    db.prepare('DELETE FROM email_messages WHERE id = ?').run(id);
-    return { deleted: true, permanent: true };
-  }
+  const target = { mailbox_id: row.mailbox_id, message_id: row.message_id, uid: row.uid, folder: row.folder };
 
-  db.prepare("UPDATE email_messages SET folder = 'Trash' WHERE id = ?").run(id);
-  return { deleted: true, permanent: false };
+  db.transaction(() => {
+    tombstone(row.mailbox_id, row.message_id);
+    if (row.folder === 'Trash') {
+      db.prepare('DELETE FROM email_messages WHERE id = ?').run(id);
+    } else {
+      db.prepare("UPDATE email_messages SET folder = 'Trash' WHERE id = ?").run(id);
+    }
+  })();
+
+  return { deleted: true, permanent: row.folder === 'Trash', target };
 }
 
 export function getAttachment(messageId, attachmentId) {
@@ -237,11 +251,46 @@ export function messageExists(mailboxId, messageId) {
   );
 }
 
+/**
+ * The IMAP high-water mark for a folder.
+ *
+ * Read from email_sync_state, not from MAX(uid) of the stored rows — deleting
+ * the newest message would otherwise rewind the mark and the next sync would
+ * re-download everything after it.
+ */
 export function highestUid(mailboxId, folder) {
   const row = emailDb()
-    .prepare('SELECT MAX(uid) AS uid FROM email_messages WHERE mailbox_id = ? AND folder = ?')
+    .prepare('SELECT last_uid FROM email_sync_state WHERE mailbox_id = ? AND folder = ?')
     .get(mailboxId, folder);
-  return row?.uid ?? 0;
+  return row?.last_uid ?? 0;
+}
+
+/** Advances the mark. Never moves backwards, even if called out of order. */
+export function recordHighestUid(mailboxId, folder, uid) {
+  if (!uid) return;
+  emailDb()
+    .prepare(
+      `INSERT INTO email_sync_state (mailbox_id, folder, last_uid, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(mailbox_id, folder) DO UPDATE SET
+         last_uid = MAX(last_uid, excluded.last_uid),
+         updated_at = CURRENT_TIMESTAMP`
+    )
+    .run(mailboxId, folder, uid);
+}
+
+export function isTombstoned(mailboxId, messageId) {
+  return Boolean(
+    emailDb()
+      .prepare('SELECT 1 FROM email_deleted_messages WHERE mailbox_id = ? AND message_id = ?')
+      .get(mailboxId, messageId)
+  );
+}
+
+export function tombstone(mailboxId, messageId) {
+  emailDb()
+    .prepare('INSERT OR IGNORE INTO email_deleted_messages (mailbox_id, message_id) VALUES (?, ?)')
+    .run(mailboxId, messageId);
 }
 
 export function insertMessage(message, attachments = []) {
