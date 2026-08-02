@@ -18,6 +18,7 @@ jobs:
           script: |
             cd ~/clubs/lhmac
             git pull
+            echo "EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}" > .env.local
             npm install
             npm run build
             pm2 restart lhmac
