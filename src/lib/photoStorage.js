@@ -4,7 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { normalizeDateString } from '@/lib/dateUtils';
 import { hashPassword } from '@/lib/password';
-import { OFFICER_TITLES } from '@/lib/clubConstants';
+import { OFFICER_TITLES, FLYING_SITES } from '@/lib/clubConstants';
+import { nextClubHour, clubParts } from '@/lib/clubTime';
 
 const DEFAULT_DB_PATH = process.env.PHOTO_DB_PATH || path.join(process.cwd(), 'server-photos', 'photos.db');
 export const PHOTO_DB_PATH = path.resolve(DEFAULT_DB_PATH);
@@ -174,6 +175,84 @@ function getDb() {
       content BLOB
     )`).run();
 
+    // ---- RC Club Connect (iOS app) ----------------------------------------
+    // One active check-in per member; a new one replaces the old.
+    db.prepare(`CREATE TABLE IF NOT EXISTS checkins (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      userName TEXT NOT NULL,
+      checkedInAt TEXT NOT NULL,
+      expiresAt TEXT NOT NULL,
+      UNIQUE(userId)
+    )`).run();
+
+    // Permanent history behind the admin stats page. Rows are never deleted;
+    // checkedOutAt/durationMinutes are filled in on check-out or expiry.
+    db.prepare(`CREATE TABLE IF NOT EXISTS field_activity_log (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      userName TEXT NOT NULL,
+      checkedInAt TEXT NOT NULL,
+      checkedOutAt TEXT,
+      durationMinutes INTEGER
+    )`).run();
+
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_field_activity_checkedin ON field_activity_log(checkedInAt)').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_field_activity_open ON field_activity_log(userId, checkedOutAt)').run();
+
+    // Social groups for the app. Named connect_* to stay clear of the email
+    // client's own groups, which live in the separate email database.
+    db.prepare(`CREATE TABLE IF NOT EXISTS connect_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      createdBy TEXT NOT NULL,
+      createdByName TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    )`).run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS connect_group_members (
+      id TEXT PRIMARY KEY,
+      groupId TEXT NOT NULL REFERENCES connect_groups(id) ON DELETE CASCADE,
+      userId TEXT NOT NULL,
+      userName TEXT NOT NULL,
+      joinedAt TEXT NOT NULL,
+      UNIQUE(groupId, userId)
+    )`).run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS connect_group_messages (
+      id TEXT PRIMARY KEY,
+      groupId TEXT NOT NULL REFERENCES connect_groups(id) ON DELETE CASCADE,
+      senderId TEXT NOT NULL,
+      senderName TEXT NOT NULL,
+      text TEXT NOT NULL,
+      isBroadcast INTEGER DEFAULT 0,
+      sentAt TEXT NOT NULL
+    )`).run();
+
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_connect_messages_group ON connect_group_messages(groupId, sentAt DESC)').run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS push_devices (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      deviceToken TEXT NOT NULL UNIQUE,
+      platform TEXT NOT NULL DEFAULT 'ios',
+      snsEndpointArn TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )`).run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS push_preferences (
+      userId TEXT PRIMARY KEY,
+      fieldStatus INTEGER DEFAULT 1,
+      events INTEGER DEFAULT 1,
+      lessons INTEGER DEFAULT 1,
+      groupMessages INTEGER DEFAULT 1,
+      newsletters INTEGER DEFAULT 1,
+      duesReminders INTEGER DEFAULT 1,
+      classifieds INTEGER DEFAULT 0,
+      photos INTEGER DEFAULT 0
+    )`).run();
+
     db.prepare(`CREATE TABLE IF NOT EXISTS lesson_requests (
       id TEXT PRIMARY KEY,
       name TEXT,
@@ -218,6 +297,10 @@ function getDb() {
 
 /** Adds columns introduced after the first release, for databases already on disk. */
 function runMigrations(database) {
+  // connect_group_members / connect_group_messages rely on ON DELETE CASCADE,
+  // which SQLite ignores unless this is switched on for the connection.
+  database.pragma('foreign_keys = ON');
+
   const addColumn = (table, column, definition) => {
     const columns = database.prepare(`PRAGMA table_info(${table})`).all();
     if (!columns.some((c) => c.name === column)) {
@@ -234,6 +317,10 @@ function runMigrations(database) {
   addColumn('users', 'isInstructor', 'INTEGER DEFAULT 0');
   addColumn('users', 'instructorNote', 'TEXT');
   addColumn('users', 'officerTitle', 'TEXT');
+  addColumn('lesson_requests', 'scheduledDate', 'TEXT');
+  // Set when the requester was signed in, so the app can notify them. The
+  // public form allows anonymous requests, which leave this null.
+  addColumn('lesson_requests', 'studentUserId', 'TEXT');
 }
 
 export function serializeUser(user) {
@@ -302,7 +389,7 @@ export function insertLessonRequest(requestData) {
   const id = `lesson-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   getDb()
     .prepare(
-      'INSERT INTO lesson_requests (id, name, email, phone, instructorId, instructorName, experience, aircraft, availability, notes, status, submittedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO lesson_requests (id, name, email, phone, instructorId, instructorName, experience, aircraft, availability, notes, status, submittedAt, studentUserId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
     .run(
       id,
@@ -316,7 +403,8 @@ export function insertLessonRequest(requestData) {
       requestData.availability || '',
       requestData.notes || '',
       'new',
-      new Date().toISOString()
+      new Date().toISOString(),
+      requestData.studentUserId || null
     );
   return getDb().prepare('SELECT * FROM lesson_requests WHERE id = ?').get(id);
 }
@@ -325,6 +413,34 @@ export function updateLessonRequestStatus(id, status) {
   return getDb()
     .prepare('UPDATE lesson_requests SET status = ?, handledAt = ? WHERE id = ?')
     .run(status, new Date().toISOString(), id);
+}
+
+export function getLessonRequestById(id) {
+  return getDb().prepare('SELECT * FROM lesson_requests WHERE id = ?').get(id);
+}
+
+/** An instructor picks up a request. */
+export function acceptLessonRequest(id, instructorId, instructorName) {
+  getDb()
+    .prepare(
+      "UPDATE lesson_requests SET instructorId = ?, instructorName = ?, status = 'accepted', handledAt = ? WHERE id = ?"
+    )
+    .run(instructorId, instructorName, new Date().toISOString(), id);
+  return getLessonRequestById(id);
+}
+
+export function scheduleLessonRequest(id, scheduledDate) {
+  getDb()
+    .prepare("UPDATE lesson_requests SET scheduledDate = ?, status = 'scheduled', handledAt = ? WHERE id = ?")
+    .run(scheduledDate, new Date().toISOString(), id);
+  return getLessonRequestById(id);
+}
+
+export function completeLessonRequest(id) {
+  getDb()
+    .prepare("UPDATE lesson_requests SET status = 'completed', handledAt = ? WHERE id = ?")
+    .run(new Date().toISOString(), id);
+  return getLessonRequestById(id);
 }
 
 export function deleteLessonRequest(id) {
@@ -427,6 +543,110 @@ export function deleteUser(id) {
 
 export function setUserRole(id, role) {
   return getDb().prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
+}
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Field usage statistics for the admin dashboard.
+ *
+ * Day and hour buckets are computed in JavaScript rather than with SQLite's
+ * strftime: the timestamps are stored as UTC, and this server runs UTC, so
+ * strftime would report an evening flying session as the small hours of the
+ * next morning. clubParts() applies the club's real timezone, DST included.
+ */
+export function getFieldActivityStats(rangeDays = 30) {
+  const db = getDb();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - rangeDays);
+  const cutoffStr = cutoff.toISOString();
+
+  const rows = db
+    .prepare('SELECT userId, userName, checkedInAt, durationMinutes FROM field_activity_log WHERE checkedInAt > ?')
+    .all(cutoffStr);
+
+  const dailyMap = new Map();
+  const dayOfWeekCounts = new Array(7).fill(0);
+  const hourCounts = new Array(24).fill(0);
+  const visitorMap = new Map();
+  let durationTotal = 0;
+  let durationSamples = 0;
+
+  for (const row of rows) {
+    const parts = clubParts(new Date(row.checkedInAt));
+    dailyMap.set(parts.dateKey, (dailyMap.get(parts.dateKey) ?? 0) + 1);
+    dayOfWeekCounts[parts.weekday] += 1;
+    hourCounts[parts.hour] += 1;
+
+    const visitor = visitorMap.get(row.userId) ?? { userId: row.userId, userName: row.userName, visits: 0 };
+    visitor.visits += 1;
+    visitor.userName = row.userName;
+    visitorMap.set(row.userId, visitor);
+
+    if (row.durationMinutes !== null && row.durationMinutes !== undefined) {
+      durationTotal += row.durationMinutes;
+      durationSamples += 1;
+    }
+  }
+
+  const byDayOfWeek = dayOfWeekCounts
+    .map((count, dayOfWeek) => ({ dayOfWeek, dayName: DAY_NAMES[dayOfWeek], count }))
+    .sort((a, b) => b.count - a.count);
+
+  const byHourOfDay = hourCounts
+    .map((count, hour) => ({ hour, count }))
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    rangeDays,
+    totalCheckins: rows.length,
+    uniqueMembers: visitorMap.size,
+    averageDurationMinutes: durationSamples > 0 ? Math.round(durationTotal / durationSamples) : null,
+    busiestDay: byDayOfWeek[0]?.count > 0 ? byDayOfWeek[0].dayName : null,
+    busiestHour: byHourOfDay[0]?.hour ?? null,
+    dailyCounts: [...dailyMap.entries()]
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    topVisitors: [...visitorMap.values()].sort((a, b) => b.visits - a.visits).slice(0, 10),
+    byDayOfWeek,
+    byHourOfDay,
+  };
+}
+
+/**
+ * Club identity and feature flags for the iOS app.
+ *
+ * Hardcoded for LHMAC for now; when this goes multi-club it should come from a
+ * club_config table or a per-instance JSON file. Coordinates are read from
+ * FLYING_SITES so the app and the website's map never disagree.
+ */
+export function getClubConfig() {
+  const db = getDb();
+  const instructorCount = db.prepare('SELECT COUNT(*) AS count FROM users WHERE isInstructor = 1').get().count;
+  const memberCount = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
+  const field = FLYING_SITES.mammoth;
+
+  return {
+    name: 'Laurel Highlands Model Airplane Club',
+    shortName: 'LHMAC',
+    amaNumber: '557',
+    fieldLocation: field.address,
+    fieldCoords: { lat: field.lat, lng: field.lon },
+    timezone: 'America/New_York',
+    website: 'https://lhmac.org',
+    features: {
+      classifieds: true,
+      flightInstructors: instructorCount > 0,
+      newsletters: true,
+      photoGallery: true,
+      fieldStatus: true,
+      events: true,
+      lessons: true,
+    },
+    stats: { memberCount, instructorCount },
+    officers: getOfficers().map((officer) => ({ name: officer.name, title: officer.officerTitle })),
+  };
 }
 
 export function getDashboardCounts() {
@@ -571,6 +791,104 @@ function classifiedCutoff() {
  * job, so the 90-day promise on the page is always true even if nothing has
  * swept the table recently.
  */
+// ---- RC Club Connect: check-ins ------------------------------------------
+
+const CHECKIN_EXPIRY_HOUR = 23; // 11 PM, club local time
+
+/** Closes any activity-log row left open for a member. */
+function closeOpenActivity(db, userId, closedAt) {
+  const open = db
+    .prepare('SELECT id, checkedInAt FROM field_activity_log WHERE userId = ? AND checkedOutAt IS NULL')
+    .all(userId);
+
+  for (const row of open) {
+    const minutes = Math.max(0, Math.round((new Date(closedAt) - new Date(row.checkedInAt)) / 60000));
+    db.prepare('UPDATE field_activity_log SET checkedOutAt = ?, durationMinutes = ? WHERE id = ?')
+      .run(closedAt, minutes, row.id);
+  }
+}
+
+export function checkIn(userId, userName) {
+  const db = getDb();
+  const id = `checkin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date();
+  const checkedInAt = now.toISOString();
+  // 11 PM in the club's timezone, not the server's — this box runs UTC, where
+  // setHours(23) would mean 7 PM Eastern. Rolls to tomorrow if it is already
+  // past 11 PM, so a late check-in is not born expired.
+  const expiresAt = nextClubHour(CHECKIN_EXPIRY_HOUR, now).toISOString();
+
+  db.transaction(() => {
+    // Checking in twice without checking out would otherwise leave the first
+    // activity row open forever and skew every duration statistic.
+    closeOpenActivity(db, userId, checkedInAt);
+
+    db.prepare('DELETE FROM checkins WHERE userId = ?').run(userId);
+    db.prepare(
+      'INSERT INTO checkins (id, userId, userName, checkedInAt, expiresAt) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, userId, userName, checkedInAt, expiresAt);
+
+    const logId = `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    db.prepare(
+      'INSERT INTO field_activity_log (id, userId, userName, checkedInAt) VALUES (?, ?, ?, ?)'
+    ).run(logId, userId, userName, checkedInAt);
+  })();
+
+  return { id, userId, userName, checkedInAt, expiresAt };
+}
+
+export function checkOut(userId) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM checkins WHERE userId = ?').get(userId);
+  if (!existing) return null;
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM checkins WHERE userId = ?').run(userId);
+    closeOpenActivity(db, userId, new Date().toISOString());
+  })();
+
+  return existing;
+}
+
+export function getCheckedInCount() {
+  return getDb()
+    .prepare('SELECT COUNT(*) AS count FROM checkins WHERE expiresAt > ?')
+    .get(new Date().toISOString()).count;
+}
+
+export function getCheckedInUsers() {
+  return getDb()
+    .prepare('SELECT userId, userName, checkedInAt FROM checkins WHERE expiresAt > ? ORDER BY checkedInAt ASC')
+    .all(new Date().toISOString());
+}
+
+export function isUserCheckedIn(userId) {
+  return Boolean(
+    getDb()
+      .prepare('SELECT 1 FROM checkins WHERE userId = ? AND expiresAt > ?')
+      .get(userId, new Date().toISOString())
+  );
+}
+
+/** Clears check-ins past their expiry, closing their activity rows. */
+export function expireAllCheckins() {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const expired = db.prepare('SELECT * FROM checkins WHERE expiresAt <= ?').all(now);
+  if (expired.length === 0) return 0;
+
+  db.transaction(() => {
+    for (const checkin of expired) {
+      // Credit the session up to its expiry time, not to now — the sweep runs
+      // on a timer and may fire well after the cut-off.
+      closeOpenActivity(db, checkin.userId, checkin.expiresAt);
+    }
+    db.prepare('DELETE FROM checkins WHERE expiresAt <= ?').run(now);
+  })();
+
+  return expired.length;
+}
+
 export function getClassifieds() {
   return getDb()
     .prepare(
@@ -802,6 +1120,215 @@ export function markContactMessageRead(id) {
 
 export function deleteContactMessage(id) {
   return getDb().prepare('DELETE FROM contact_messages WHERE id = ?').run(id);
+}
+
+// ---- RC Club Connect: social groups ---------------------------------------
+
+export function getConnectGroups(userId) {
+  return getDb()
+    .prepare(`
+      SELECT g.*, COUNT(gm.id) AS memberCount
+      FROM connect_groups g
+      JOIN connect_group_members gm ON gm.groupId = g.id
+      WHERE g.id IN (SELECT groupId FROM connect_group_members WHERE userId = ?)
+      GROUP BY g.id
+      ORDER BY g.name ASC
+    `)
+    .all(userId);
+}
+
+export function getConnectGroup(id) {
+  return getDb().prepare('SELECT * FROM connect_groups WHERE id = ?').get(id);
+}
+
+export function createConnectGroup(name, userId, userName) {
+  const db = getDb();
+  const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const memberId = `gm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date().toISOString();
+
+  db.transaction(() => {
+    db.prepare(
+      'INSERT INTO connect_groups (id, name, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, name, userId, userName, now);
+    // The creator joins their own group.
+    db.prepare(
+      'INSERT INTO connect_group_members (id, groupId, userId, userName, joinedAt) VALUES (?, ?, ?, ?, ?)'
+    ).run(memberId, id, userId, userName, now);
+  })();
+
+  return getConnectGroup(id);
+}
+
+export function deleteConnectGroup(id) {
+  return getDb().prepare('DELETE FROM connect_groups WHERE id = ?').run(id);
+}
+
+export function updateConnectGroupName(id, name) {
+  getDb().prepare('UPDATE connect_groups SET name = ? WHERE id = ?').run(name, id);
+  return getConnectGroup(id);
+}
+
+/** Members of a group, each flagged with whether they are at the field now. */
+export function getConnectGroupMembers(groupId) {
+  return getDb()
+    .prepare(`
+      SELECT gm.userId, gm.userName, gm.joinedAt,
+             CASE WHEN c.userId IS NULL THEN 0 ELSE 1 END AS isCheckedIn
+      FROM connect_group_members gm
+      LEFT JOIN checkins c ON c.userId = gm.userId AND c.expiresAt > ?
+      WHERE gm.groupId = ?
+      ORDER BY gm.userName ASC
+    `)
+    .all(new Date().toISOString(), groupId)
+    .map((member) => ({ ...member, isCheckedIn: Boolean(member.isCheckedIn) }));
+}
+
+export function addConnectGroupMember(groupId, userId, userName) {
+  const id = `gm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  getDb()
+    .prepare(
+      'INSERT OR IGNORE INTO connect_group_members (id, groupId, userId, userName, joinedAt) VALUES (?, ?, ?, ?, ?)'
+    )
+    .run(id, groupId, userId, userName, new Date().toISOString());
+}
+
+export function removeConnectGroupMember(groupId, userId) {
+  return getDb()
+    .prepare('DELETE FROM connect_group_members WHERE groupId = ? AND userId = ?')
+    .run(groupId, userId);
+}
+
+export function isConnectGroupMember(groupId, userId) {
+  return Boolean(
+    getDb()
+      .prepare('SELECT 1 FROM connect_group_members WHERE groupId = ? AND userId = ?')
+      .get(groupId, userId)
+  );
+}
+
+export function getConnectGroupMemberIds(groupId) {
+  return getDb()
+    .prepare('SELECT userId FROM connect_group_members WHERE groupId = ?')
+    .all(groupId)
+    .map((row) => row.userId);
+}
+
+export function getConnectGroupMessages(groupId, page = 1, limit = 50) {
+  const offset = (page - 1) * limit;
+  return getDb()
+    .prepare('SELECT * FROM connect_group_messages WHERE groupId = ? ORDER BY sentAt DESC LIMIT ? OFFSET ?')
+    .all(groupId, limit, offset)
+    .map((message) => ({ ...message, isBroadcast: Boolean(message.isBroadcast) }));
+}
+
+export function insertConnectGroupMessage(groupId, senderId, senderName, text, isBroadcast = false) {
+  const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  getDb()
+    .prepare(
+      'INSERT INTO connect_group_messages (id, groupId, senderId, senderName, text, isBroadcast, sentAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+    .run(id, groupId, senderId, senderName, text, isBroadcast ? 1 : 0, new Date().toISOString());
+
+  const message = getDb().prepare('SELECT * FROM connect_group_messages WHERE id = ?').get(id);
+  return { ...message, isBroadcast: Boolean(message.isBroadcast) };
+}
+
+export function getGroupCheckedInMembers(groupId) {
+  return getDb()
+    .prepare(`
+      SELECT gm.userId, gm.userName, c.checkedInAt
+      FROM connect_group_members gm
+      JOIN checkins c ON c.userId = gm.userId AND c.expiresAt > ?
+      WHERE gm.groupId = ?
+      ORDER BY c.checkedInAt ASC
+    `)
+    .all(new Date().toISOString(), groupId);
+}
+
+// ---- RC Club Connect: push devices and preferences ------------------------
+
+const PUSH_PREFERENCE_FIELDS = [
+  'fieldStatus',
+  'events',
+  'lessons',
+  'groupMessages',
+  'newsletters',
+  'duesReminders',
+  'classifieds',
+  'photos',
+];
+
+export function registerPushDevice(userId, deviceToken, platform = 'ios') {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  // Keyed on the device token: a handed-down phone must follow its new owner
+  // rather than keep notifying the previous one.
+  const existing = db.prepare('SELECT id FROM push_devices WHERE deviceToken = ?').get(deviceToken);
+  if (existing) {
+    db.prepare('UPDATE push_devices SET userId = ?, platform = ?, updatedAt = ? WHERE deviceToken = ?')
+      .run(userId, platform, now, deviceToken);
+  } else {
+    const id = `device-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    db.prepare(
+      'INSERT INTO push_devices (id, userId, deviceToken, platform, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(id, userId, deviceToken, platform, now, now);
+  }
+
+  return db.prepare('SELECT * FROM push_devices WHERE deviceToken = ?').get(deviceToken);
+}
+
+export function unregisterPushDevice(deviceToken) {
+  return getDb().prepare('DELETE FROM push_devices WHERE deviceToken = ?').run(deviceToken);
+}
+
+export function getUserDevices(userId) {
+  return getDb().prepare('SELECT * FROM push_devices WHERE userId = ?').all(userId);
+}
+
+export function getDevicesForUsers(userIds) {
+  if (!userIds.length) return [];
+  const placeholders = userIds.map(() => '?').join(',');
+  return getDb().prepare(`SELECT * FROM push_devices WHERE userId IN (${placeholders})`).all(...userIds);
+}
+
+function toPreferenceBooleans(row) {
+  if (!row) return null;
+  const prefs = { userId: row.userId };
+  for (const field of PUSH_PREFERENCE_FIELDS) prefs[field] = Boolean(row[field]);
+  return prefs;
+}
+
+/** Reads a member's preferences, creating the defaults row on first access. */
+export function getPushPreferences(userId) {
+  const db = getDb();
+  let row = db.prepare('SELECT * FROM push_preferences WHERE userId = ?').get(userId);
+  if (!row) {
+    db.prepare('INSERT OR IGNORE INTO push_preferences (userId) VALUES (?)').run(userId);
+    row = db.prepare('SELECT * FROM push_preferences WHERE userId = ?').get(userId);
+  }
+  return toPreferenceBooleans(row);
+}
+
+export function updatePushPreferences(userId, preferences) {
+  const db = getDb();
+  getPushPreferences(userId);
+
+  const updates = PUSH_PREFERENCE_FIELDS.filter((field) => preferences[field] !== undefined);
+  if (updates.length === 0) return getPushPreferences(userId);
+
+  const assignments = updates.map((field) => `${field} = ?`).join(', ');
+  const values = updates.map((field) => (preferences[field] ? 1 : 0));
+  db.prepare(`UPDATE push_preferences SET ${assignments} WHERE userId = ?`).run(...values, userId);
+
+  return getPushPreferences(userId);
+}
+
+/** Of the given members, those who accept a given notification category. */
+export function filterUsersByPushPreference(userIds, category) {
+  if (!PUSH_PREFERENCE_FIELDS.includes(category)) return [];
+  return userIds.filter((userId) => getPushPreferences(userId)[category]);
 }
 
 export function getQueueItems() {

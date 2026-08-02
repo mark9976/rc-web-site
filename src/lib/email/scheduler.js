@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { syncAllMailboxes } from '@/lib/email/syncEngine';
 import { dueBlasts } from '@/lib/email/emailStore';
 import { runBlast, isBlastRunning } from '@/lib/email/blastEngine';
+import { expireAllCheckins } from '@/lib/photoStorage';
 
 let started = false;
 
@@ -36,5 +37,17 @@ export function startEmailScheduler() {
     }
   });
 
-  console.log('[email] scheduler started (IMAP sync every 3 min, blast check every 1 min)');
+  // Field check-ins lapse at 11 PM club time. Sweeping every 15 minutes closes
+  // their activity-log rows so the stats page stays accurate without an
+  // external cron job.
+  cron.schedule('*/15 * * * *', () => {
+    try {
+      const expired = expireAllCheckins();
+      if (expired > 0) console.log(`[checkin] expired ${expired} check-in(s)`);
+    } catch (error) {
+      console.error('[checkin] expiry sweep failed:', error.message);
+    }
+  });
+
+  console.log('[email] scheduler started (IMAP sync every 3 min, blast check every 1 min, check-in sweep every 15 min)');
 }

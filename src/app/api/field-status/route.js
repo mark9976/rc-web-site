@@ -4,6 +4,7 @@ import {
   getManualFieldStatus,
   getEffectiveFieldStatus,
   getUpcomingClosures,
+  getCheckedInCount,
 } from '@/lib/photoStorage';
 import { requireAdmin } from '@/lib/apiAuth';
 
@@ -13,6 +14,8 @@ const STATUSES = ['open', 'closed', 'maintenance'];
 
 export async function GET() {
   return NextResponse.json({
+    // The app shows "N at the field" alongside the open/closed banner.
+    checkedInCount: getCheckedInCount(),
     // `fieldStatus` is what the field is actually in right now, which may come
     // from a running scheduled closure rather than the manual toggle.
     fieldStatus: getEffectiveFieldStatus(),

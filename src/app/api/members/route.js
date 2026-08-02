@@ -10,7 +10,7 @@ import {
   serializeUser,
 } from '@/lib/photoStorage';
 import { OFFICER_TITLES } from '@/lib/clubConstants';
-import { requireAdmin } from '@/lib/apiAuth';
+import { requireAdmin, requireUser } from '@/lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,27 @@ function clean(value, limit) {
   return value === undefined ? undefined : value.toString().trim().slice(0, limit);
 }
 
-export async function GET() {
+export async function GET(request) {
+  const search = new URL(request.url).searchParams.get('search');
+
+  // The group member picker in the app needs to look people up, and ordinary
+  // members use it. Search is therefore open to any signed-in member but
+  // returns names only — the full listing below carries phone numbers, home
+  // addresses and AMA numbers, and stays admin-only.
+  if (search !== null) {
+    const { user, response } = requireUser();
+    if (response) return response;
+
+    const term = search.trim().toLowerCase();
+    const matches = getUsers()
+      .filter((member) => member.id !== user.id)
+      .filter((member) => !term || member.name?.toLowerCase().includes(term))
+      .slice(0, 25)
+      .map((member) => ({ id: member.id, name: member.name }));
+
+    return NextResponse.json({ members: matches });
+  }
+
   const { response } = requireAdmin();
   if (response) return response;
 

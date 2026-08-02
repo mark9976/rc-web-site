@@ -27,14 +27,30 @@ export function sessionCookieOptions(maxAge = SESSION_MAX_AGE) {
 }
 
 /**
+ * The raw session token for this request, from either transport.
+ *
+ * Logout needs this as well as getCurrentUser: reading only the cookie would
+ * leave a mobile session alive after the member signed out of the app.
+ */
+export function getSessionToken() {
+  const authHeader = headers().get('authorization');
+  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  return bearer || cookies().get(SESSION_COOKIE)?.value || null;
+}
+
+/**
  * Returns the signed-in user for the current request, or null.
+ *
+ * Accepts either an `Authorization: Bearer <token>` header (the iOS app, which
+ * cannot use cookies) or the session cookie (the website). Both carry the same
+ * session token, so the two clients share one auth system.
  *
  * An account that still owes a forced password reset is deliberately treated as
  * not signed in: login issues it a session only so the reset page knows whose
  * password to change, and it must not grant access to anything else.
  */
 export function getCurrentUser() {
-  const token = cookies().get(SESSION_COOKIE)?.value;
+  const token = getSessionToken();
   if (!token) return null;
 
   const session = getSession(token);

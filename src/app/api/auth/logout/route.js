@@ -1,12 +1,13 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { deleteSession } from '@/lib/photoStorage';
-import { SESSION_COOKIE, sessionCookieOptions } from '@/lib/apiAuth';
+import { SESSION_COOKIE, sessionCookieOptions, getSessionToken } from '@/lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
-  const sessionToken = cookies().get(SESSION_COOKIE)?.value;
+  // Resolves a Bearer token as well as the cookie: the app has no cookie, and
+  // reading only the cookie would leave its session valid after sign-out.
+  const sessionToken = getSessionToken();
   if (sessionToken) {
     deleteSession(sessionToken);
   }

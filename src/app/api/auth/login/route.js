@@ -29,9 +29,12 @@ export async function POST(request) {
   // A real session is issued even for a forced reset, so the reset page can prove
   // who is resetting after a refresh instead of relying on in-memory state.
   const token = createSession(user.id);
+  // The token is returned in the body as well as the cookie: the iOS app cannot
+  // use cookies, so it reads `token` here and sends it as a Bearer header. The
+  // website ignores it and keeps using the httpOnly cookie.
   const response = user.needsPasswordReset
-    ? NextResponse.json({ needsPasswordReset: true, userId: user.id })
-    : NextResponse.json({ user: serializeUser(user) });
+    ? NextResponse.json({ needsPasswordReset: true, userId: user.id, token })
+    : NextResponse.json({ user: serializeUser(user), token });
   setSessionCookie(response, token);
   return response;
 }
