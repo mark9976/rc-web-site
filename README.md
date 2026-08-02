@@ -75,6 +75,10 @@ Type=simple
 WorkingDirectory=/home/youruser/lhmac-site
 Environment=NODE_ENV=production
 Environment=PHOTO_DB_PATH=/var/www/lhmac-photos/photos.db
+Environment=EMAIL_DB_PATH=/var/www/lhmac-photos/email.db
+# Supplies EMAIL_ENCRYPTION_KEY; without it the email client cannot decrypt
+# mailbox passwords.
+EnvironmentFile=/home/mark9976/lhmac-site/.env.local
 ExecStart=/usr/bin/npm start
 Restart=on-failure
 User=youruser
@@ -166,12 +170,66 @@ server {
   billing account, no third-party script. "Get Directions" hands off to Apple Maps on iOS/macOS and
   Google Maps elsewhere, both of which open the native app on a phone when installed.
 - **Field coordinates** live in `FLYING_SITES` (`src/lib/clubConstants.js`). Mammoth Park is the
-  verified location already used across the site. **Acme Dam is an unverified approximation** and is
-  flagged `verified: false` — confirm it before members rely on it for navigation.
+  location already used across the site. The float-fly pin sits at the north end of Donegal Lake,
+  placed from the spot Mark marked on the map (2026-08-02). Note the site is still *titled*
+  "Chestnut Ridge Park — Acme Dam" while the pin is on Donegal Lake; confirm which name is right.
 - **Classifieds expire after 90 days.** This is enforced at read time in `getClassifieds()`, not just
   claimed in the banner, so the page cannot promise something untrue. `purgeExpiredClassifieds()`
   physically deletes expired rows to reclaim photo storage. The lifetime is
   `CLASSIFIED_LIFETIME_DAYS`.
+
+## Email Client
+
+Reached from the **Admin Email** tab in the main nav (admins only), which shows a live unread count
+polled every 60 seconds from `GET /api/email/unread-count`.
+
+- **Incoming**: a background IMAP poll (`node-cron`, every 3 minutes, started by
+  `src/instrumentation.js`) downloads new mail into SQLite; the UI reads only from SQLite so pages
+  load instantly. First sync pulls 90 days; later syncs track IMAP UIDs.
+- **Outgoing**: nodemailer over SMTP. Blasts send one message per recipient — not BCC — so merge
+  fields resolve per person and one bad address fails alone. Batches of 10 with a 2s gap and a
+  240/hour ceiling, to stay inside GoDaddy's limits.
+- **Every `/api/email/*` route is admin-only** (`requireAdmin` via `src/lib/email/routeHelpers.js`).
+
+### Storage
+
+Email uses **its own SQLite file**, separate from `photos.db`: message bodies and attachments grow
+far faster than the rest of the site, so keeping them apart lets the two be backed up, pruned, and
+restored independently.
+
+- Path: `EMAIL_DB_PATH`, defaulting to `email.db` beside the photo database
+  (so production is `/var/www/lhmac-photos/email.db`).
+- The roster link is by id only — `email_contacts.member_id` points at `users.id` in the *other*
+  file, so there is no enforced foreign key. "Sync from members" reads the roster through
+  `photoStorage` rather than joining in SQL.
+
+### Security notes
+
+- Mailbox passwords are encrypted with **AES-256-GCM** before storage (`src/lib/email/encryption.js`). GCM rather than CBC so tampered ciphertext fails loudly instead of decrypting
+  to garbage. The password column is never returned by any API.
+- Received HTML is sanitized with DOMPurify before rendering, and **remote images are blocked**
+  behind a "Show images" button so senders can't confirm the mail was opened.
+- Merge fields HTML-escape their values — contact names are user input and land in an HTML body.
+
+### Environment variables
+
+```
+EMAIL_ENCRYPTION_KEY=<32-byte hex>   # required; generate with the command below
+EMAIL_DB_PATH=/var/www/lhmac-photos/email.db   # optional, this is the default
+```
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+> **Back up `.env.local`.** It is gitignored and holds `EMAIL_ENCRYPTION_KEY`. Lose that key and
+> every stored mailbox password becomes undecryptable and has to be re-entered.
+
+The systemd unit must be able to see the key. Add to `/etc/systemd/system/lhmac-site.service`:
+
+```ini
+EnvironmentFile=/home/mark9976/lhmac-site/.env.local
+```
 
 ## Photo Storage Behavior
 

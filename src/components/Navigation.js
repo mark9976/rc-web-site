@@ -1,9 +1,44 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Menu, X, Plane } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
+
+const UNREAD_POLL_MS = 60000;
+
+/** Total unread across every mailbox, refreshed without a page reload. */
+function useUnreadEmailCount(enabled) {
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setUnread(0);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/email/unread-count', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setUnread(data.unread || 0);
+      } catch {
+        // A failed poll just leaves the previous count in place.
+      }
+    };
+
+    load();
+    const timer = window.setInterval(load, UNREAD_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [enabled]);
+
+  return unread;
+}
 
 const navLinks = [
   { href: '/', label: 'Home' },
@@ -21,6 +56,7 @@ export default function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const auth = useAuth();
   const pendingRequestCount = auth.pendingApplications?.filter((application) => application.status === 'pending').length || 0;
+  const unreadEmail = useUnreadEmailCount(auth.isAdmin);
 
   return (
     <nav className="bg-field-darkgreen sticky top-0 z-50 shadow-lg">
@@ -47,14 +83,24 @@ export default function Navigation() {
               </Link>
             ))}
             {auth.isAdmin ? (
-              <Link href="/admin/" className="nav-link text-flyday-maybe flex items-center gap-2">
-                Admin
-                {pendingRequestCount > 0 ? (
-                  <span className="inline-flex items-center rounded-full bg-field-green text-white text-[10px] font-semibold px-2 py-0.5">
-                    {pendingRequestCount}
-                  </span>
-                ) : null}
-              </Link>
+              <>
+                <Link href="/admin/" className="nav-link text-flyday-maybe flex items-center gap-2">
+                  Admin
+                  {pendingRequestCount > 0 ? (
+                    <span className="inline-flex items-center rounded-full bg-field-green text-white text-[10px] font-semibold px-2 py-0.5">
+                      {pendingRequestCount}
+                    </span>
+                  ) : null}
+                </Link>
+                <Link href="/admin/email/" className="nav-link text-flyday-maybe flex items-center gap-2 whitespace-nowrap">
+                  Admin Email
+                  {unreadEmail > 0 ? (
+                    <span className="inline-flex items-center rounded-full bg-sky-deep text-white text-[10px] font-semibold px-2 py-0.5">
+                      {unreadEmail}
+                    </span>
+                  ) : null}
+                </Link>
+              </>
             ) : null}
             {auth.isAuthenticated ? (
               <button
@@ -97,20 +143,36 @@ export default function Navigation() {
               </Link>
             ))}
             {auth.isAdmin ? (
-              <Link
-                href="/admin/"
-                className="block py-2 px-3 text-flyday-maybe hover:bg-white/10 rounded-lg text-sm font-medium"
-                onClick={() => setMobileOpen(false)}
-              >
-                <span className="flex items-center gap-2">
-                  Admin Dashboard
-                  {pendingRequestCount > 0 ? (
-                    <span className="inline-flex items-center rounded-full bg-field-green text-white text-[10px] font-semibold px-2 py-0.5">
-                      {pendingRequestCount}
-                    </span>
-                  ) : null}
-                </span>
-              </Link>
+              <>
+                <Link
+                  href="/admin/"
+                  className="block py-2 px-3 text-flyday-maybe hover:bg-white/10 rounded-lg text-sm font-medium"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <span className="flex items-center gap-2">
+                    Admin Dashboard
+                    {pendingRequestCount > 0 ? (
+                      <span className="inline-flex items-center rounded-full bg-field-green text-white text-[10px] font-semibold px-2 py-0.5">
+                        {pendingRequestCount}
+                      </span>
+                    ) : null}
+                  </span>
+                </Link>
+                <Link
+                  href="/admin/email/"
+                  className="block py-2 px-3 text-flyday-maybe hover:bg-white/10 rounded-lg text-sm font-medium"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <span className="flex items-center gap-2">
+                    Admin Email
+                    {unreadEmail > 0 ? (
+                      <span className="inline-flex items-center rounded-full bg-sky-deep text-white text-[10px] font-semibold px-2 py-0.5">
+                        {unreadEmail}
+                      </span>
+                    ) : null}
+                  </span>
+                </Link>
+              </>
             ) : null}
             {auth.isAuthenticated ? (
               <button

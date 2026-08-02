@@ -37,9 +37,8 @@ export const CLASSIFIED_LIFETIME_DAYS = 90;
  * Flying sites, used for the maps and directions links on the Fields page.
  *
  * Mammoth Park's coordinates match the ones already used elsewhere in the site.
- * VERIFY the Acme Dam coordinates before relying on them for navigation — they
- * are an approximation of the Chestnut Ridge Park float-fly site, not a surveyed
- * point.
+ * The float-fly pin sits at the north end of Donegal Lake, placed from the
+ * location Mark marked on the map on 2026-08-02.
  */
 export const FLYING_SITES = {
   mammoth: {
@@ -51,10 +50,11 @@ export const FLYING_SITES = {
   },
   acmeDam: {
     name: 'Chestnut Ridge Park — Acme Dam',
-    address: 'Acme, PA 15610',
-    lat: 40.1361,
-    lon: -79.4283,
-    verified: false,
+    address: 'Donegal Lake, Donegal, PA 15628',
+    // West shore at the north end of Donegal Lake, by the dam.
+    lat: 40.1439,
+    lon: -79.3733,
+    verified: true,
   },
 };
 
