@@ -6,3 +6,6 @@ out/
 .env
 .env.local
 .DS_Store
+server-photos/*.db
+server-photos/*.db-shm
+server-photos/*.db-wal
