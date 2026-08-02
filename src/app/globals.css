@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@layer base {
+  body {
+    @apply font-body text-ink bg-surface-warm;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .flyday-card {
+    @apply rounded-lg p-4 text-center transition-all duration-200;
+  }
+
+  .flyday-go {
+    @apply bg-flyday-go/10 border-2 border-flyday-go text-flyday-go;
+  }
+
+  .flyday-maybe {
+    @apply bg-flyday-maybe/10 border-2 border-flyday-maybe text-flyday-maybe;
+  }
+
+  .flyday-nogo {
+    @apply bg-flyday-nogo/10 border-2 border-flyday-nogo text-flyday-nogo;
+  }
+
+  .nav-link {
+    @apply text-white/80 hover:text-white transition-colors duration-150 text-sm font-medium tracking-wide uppercase;
+  }
+
+  .nav-link-active {
+    @apply text-white border-b-2 border-white;
+  }
+
+  .section-heading {
+    @apply font-display text-2xl sm:text-3xl font-bold text-ink tracking-tight;
+  }
+
+  .card {
+    @apply bg-surface-card rounded-xl shadow-sm border border-black/5 p-6;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 bg-field-green text-white px-6 py-3 rounded-lg
+           font-display font-semibold tracking-wide uppercase text-sm
+           hover:bg-field-darkgreen transition-colors duration-150;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 border-2 border-field-green text-field-green px-6 py-3 rounded-lg
+           font-display font-semibold tracking-wide uppercase text-sm
+           hover:bg-field-green hover:text-white transition-colors duration-150;
+  }
+}
