@@ -21,6 +21,7 @@ jobs:
             cd ~/clubs/lhmac
             git pull
             echo "EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}" > .env.local
+            echo "EMAIL_DB_PATH=/home/mark/clubs/lhmac/email.db" >> .env.local
             npm install
             npm run build
             pm2 restart lhmac
