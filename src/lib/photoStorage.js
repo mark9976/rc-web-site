@@ -1351,6 +1351,22 @@ export function getQueuedPhotoContent(id) {
   return getDb().prepare('SELECT filename, content FROM photo_queue WHERE id = ?').get(id);
 }
 
+/**
+ * Removes an approved photo from the public gallery.
+ *
+ * Separate from deleteQueueItem, which only rejects a photo that is still
+ * awaiting review — once approved, a photo lives in recent_photos and nothing
+ * used to be able to remove it.
+ */
+export function deleteRecentPhoto(id) {
+  const db = getDb();
+  const photo = db.prepare('SELECT id, filename, caption FROM recent_photos WHERE id = ?').get(id);
+  if (!photo) return null;
+
+  db.prepare('DELETE FROM recent_photos WHERE id = ?').run(id);
+  return photo;
+}
+
 export function getRecentPhotos() {
   return getDb()
     .prepare('SELECT id, filename, caption, photographer, date, approvedAt FROM recent_photos ORDER BY approvedAt DESC')

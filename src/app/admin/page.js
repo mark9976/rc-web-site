@@ -215,6 +215,30 @@ export default function AdminPage() {
     }
   };
 
+  /**
+   * Takes a photo down from the public gallery.
+   *
+   * Distinct from rejecting: reject only applies while a photo is still in the
+   * review queue, and does nothing once it has been approved.
+   */
+  const handleRemoveFromGallery = async (photo) => {
+    const label = photo.caption || photo.filename;
+    if (!window.confirm(`Remove "${label}" from the public gallery? This cannot be undone.`)) return;
+
+    setUploadError('');
+    try {
+      const response = await fetch('/api/photos/recent', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: photo.id }),
+      });
+      if (!response.ok) throw new Error(await readError(response, 'Could not remove the photo.'));
+      await refreshPhotos();
+    } catch (error) {
+      setUploadError(error.message);
+    }
+  };
+
   const handleFileInput = async (event) => {
     if (event.target.files.length > 0) {
       await handleFiles(event.target.files);
@@ -997,6 +1021,69 @@ export default function AdminPage() {
               ))
             )}
           </div>
+        </div>
+
+        {/* ─── Public gallery ─── */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display font-bold text-xl flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-field-green" />
+              Photo Gallery
+            </h2>
+            <span className="text-xs font-display font-bold bg-field-green/10 text-field-green px-2 py-1 rounded-full shrink-0">
+              {recentPhotos.length} live
+            </span>
+          </div>
+          <p className="text-sm text-ink-muted mb-4">
+            Everything approved and visible on the Media page. Removing a photo here takes it off the
+            public site immediately.
+          </p>
+
+          {recentPhotos.length === 0 ? (
+            <div className="rounded-3xl bg-surface-muted p-6 text-center text-sm text-ink-muted">
+              No photos in the gallery yet.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {recentPhotos.map((photo) => (
+                <div key={photo.id} className="group relative">
+                  <div className="aspect-square rounded-xl overflow-hidden border border-black/5 bg-surface-muted">
+                    <img
+                      src={`/api/photos/files/${encodeURIComponent(photo.id)}`}
+                      alt={photo.caption || photo.filename}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <a
+                      href={`/api/photos/files/${encodeURIComponent(photo.id)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-8 h-8 rounded-lg bg-white/90 text-sky-deep hover:bg-white shadow flex items-center justify-center"
+                      title="View full size"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFromGallery(photo)}
+                      className="w-8 h-8 rounded-lg bg-white/90 text-flyday-nogo hover:bg-flyday-nogo hover:text-white shadow flex items-center justify-center"
+                      title="Remove from gallery"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-xs text-ink-muted truncate" title={photo.caption || photo.filename}>
+                    {photo.caption || photo.filename}
+                  </p>
+                  <p className="text-[11px] text-ink-light truncate">
+                    by {photo.photographer} · {photo.date}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ─── Contact Inbox ─── */}
