@@ -634,7 +634,7 @@ export function getClubConfig() {
     fieldLocation: field.address,
     fieldCoords: { lat: field.lat, lng: field.lon },
     timezone: 'America/New_York',
-    website: 'https://lhmac.org',
+    website: 'https://lhmac.info',
     features: {
       classifieds: true,
       flightInstructors: instructorCount > 0,

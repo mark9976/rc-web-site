@@ -36,6 +36,35 @@ export function oauthConfigured() {
 }
 
 /**
+ * Problems with MICROSOFT_REDIRECT_URI that Entra will reject, reported before
+ * the admin is bounced out to Microsoft only to hit AADSTS50011.
+ */
+export function redirectUriProblem() {
+  const { redirectUri } = oauthConfig();
+  if (!redirectUri) return null;
+
+  let url;
+  try {
+    url = new URL(redirectUri);
+  } catch {
+    return 'MICROSOFT_REDIRECT_URI is not a valid URL.';
+  }
+
+  const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  // Entra permits http only for localhost; anything else must be https.
+  if (url.protocol === 'http:' && !isLocalhost) {
+    return `MICROSOFT_REDIRECT_URI uses http. Microsoft only accepts https (localhost excepted), so this will fail with AADSTS50011. Use https://${url.host}${url.pathname}.`;
+  }
+  if (!url.pathname.endsWith('/api/email/oauth/callback')) {
+    return `MICROSOFT_REDIRECT_URI should end in /api/email/oauth/callback, but is ${url.pathname}.`;
+  }
+  if (redirectUri.endsWith('/')) {
+    return 'MICROSOFT_REDIRECT_URI has a trailing slash. Microsoft matches it byte for byte; remove it.';
+  }
+  return null;
+}
+
+/**
  * Builds an absolute URL back into this app.
  *
  * Derived from MICROSOFT_REDIRECT_URI rather than `request.url`: behind nginx

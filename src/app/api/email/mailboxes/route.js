@@ -3,7 +3,7 @@ import { testImapConnection } from '@/lib/email/imapClient';
 import { testSmtpConnection } from '@/lib/email/smtpClient';
 import { encryptionConfigured } from '@/lib/email/encryption';
 import { handler, ok, fail } from '@/lib/email/routeHelpers';
-import { oauthConfigured, oauthConfig } from '@/lib/email/microsoftOAuth';
+import { oauthConfigured, oauthConfig, redirectUriProblem } from '@/lib/email/microsoftOAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +15,11 @@ export const GET = handler(async () =>
   ok({
     mailboxes: listMailboxes(),
     encryptionConfigured: encryptionConfigured(),
-    microsoftOAuth: { configured: oauthConfigured(), redirectUri: oauthConfig().redirectUri || null },
+    microsoftOAuth: {
+      configured: oauthConfigured(),
+      redirectUri: oauthConfig().redirectUri || null,
+      problem: redirectUriProblem(),
+    },
   })
 );
 

@@ -144,6 +144,12 @@ export default function EmailSettingsPage() {
                   Redirect URI in use: <code className="rounded bg-surface-muted px-1">{oauth.redirectUri}</code>
                   {' '}— this must match the app registration in Azure exactly.
                 </p>
+                {oauth.problem ? (
+                  <p className="mt-3 flex items-start gap-2 rounded-2xl border border-flyday-nogo/30 bg-flyday-nogo/5 p-3 text-sm text-flyday-nogo">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{oauth.problem}</span>
+                  </p>
+                ) : null}
               </>
             ) : (
               <div className="mt-4 rounded-2xl border border-flyday-maybe/30 bg-flyday-maybe/5 p-4 text-sm text-flyday-maybe">

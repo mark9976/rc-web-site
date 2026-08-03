@@ -30,10 +30,14 @@ You only have to do this once, and it produces two values for `.env.local`.
    |---|---|
    | Local dev | `http://localhost:3000/api/email/oauth/callback` |
    | This server (LAN) | `http://YOUR_SERVER_IP:9080/api/email/oauth/callback` |
-   | Production | `https://lhmac.org/api/email/oauth/callback` |
+   | Production | `https://lhmac.info/api/email/oauth/callback` |
 
    These must match **byte for byte** — protocol, port, and no trailing slash. A mismatch gives
    `AADSTS50011: The redirect URI specified in the request does not match`.
+
+   > Entra only accepts **https** redirect URIs, with `http://localhost` as the sole exception.
+   > `http://lhmac.info/...` cannot be registered — it must be `https://`. The site already serves
+   > HTTPS, so use that.
 
 6. **Certificates & secrets → Client secrets → New client secret**
    - Description: `email-client`, Expiry: 24 months
