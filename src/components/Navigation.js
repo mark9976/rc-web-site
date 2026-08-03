@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Menu, X, Plane } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 
 const UNREAD_POLL_MS = 60000;
@@ -64,7 +64,15 @@ export default function Navigation() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 shrink-0">
-            <Plane className="w-8 h-8 text-white" />
+            {/* Club crest. Sized by height so the 117x144 portrait artwork keeps
+                its aspect ratio inside the 64px-tall bar. */}
+            <img
+              src="/lhmac-logo.png"
+              alt="Laurel Highlands Model Airplane Club"
+              width={117}
+              height={144}
+              className="h-11 w-auto shrink-0"
+            />
             <div className="leading-tight">
               <span className="text-white font-display font-bold text-lg tracking-tight block">
                 LHMAC
