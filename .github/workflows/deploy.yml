@@ -11,23 +11,62 @@ jobs:
     steps:
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
+        env:
+          # Passed through `envs:` below rather than interpolated into the
+          # script, so a secret containing quotes or $ cannot break the shell.
+          EMAIL_ENCRYPTION_KEY: ${{ secrets.EMAIL_ENCRYPTION_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_REDIRECT_URI: ${{ secrets.MICROSOFT_REDIRECT_URI }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: EMAIL_ENCRYPTION_KEY,CRON_SECRET,MICROSOFT_CLIENT_ID,MICROSOFT_CLIENT_SECRET,MICROSOFT_REDIRECT_URI
           script: |
+            set -eu
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
             cd ~/clubs/lhmac
             git pull
-            echo "EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}" > .env.local
-            echo "EMAIL_DB_PATH=/home/mark/clubs/lhmac/email.db" >> .env.local
-            echo "CRON_SECRET=${{ secrets.CRON_SECRET }}" >> .env.local
-            # Microsoft OAuth2 for M365 mailboxes. MICROSOFT_REDIRECT_URI must
-            # byte-match a redirect URI registered in the Azure app.
-            echo "MICROSOFT_CLIENT_ID=${{ secrets.MICROSOFT_CLIENT_ID }}" >> .env.local
-            echo "MICROSOFT_CLIENT_SECRET=${{ secrets.MICROSOFT_CLIENT_SECRET }}" >> .env.local
-            echo "MICROSOFT_REDIRECT_URI=${{ secrets.MICROSOFT_REDIRECT_URI }}" >> .env.local
+
+            # An unset GitHub secret arrives as an empty string. Writing that to
+            # .env.local silently produces a running app with, say, an empty
+            # MICROSOFT_CLIENT_ID — which Microsoft rejects with AADSTS900144
+            # while the settings page reports "not configured". Fail here
+            # instead, before anything on the server is touched.
+            missing=""
+            for name in EMAIL_ENCRYPTION_KEY CRON_SECRET MICROSOFT_CLIENT_ID MICROSOFT_CLIENT_SECRET MICROSOFT_REDIRECT_URI; do
+              eval "value=\${$name:-}"
+              [ -n "$value" ] || missing="$missing $name"
+            done
+            if [ -n "$missing" ]; then
+              echo "ERROR: missing GitHub repository secrets:$missing"
+              echo "Add them under Settings > Secrets and variables > Actions."
+              echo ".env.local left untouched; deploy aborted."
+              exit 1
+            fi
+
+            # Keep the last good copy: if a deploy ever writes a bad value, the
+            # previous working configuration is still recoverable on the box.
+            [ -f .env.local ] && cp .env.local .env.local.bak
+
+            umask 077
+            {
+              printf 'EMAIL_ENCRYPTION_KEY=%s\n' "$EMAIL_ENCRYPTION_KEY"
+              printf 'EMAIL_DB_PATH=%s\n'        "/home/mark/clubs/lhmac/email.db"
+              printf 'CRON_SECRET=%s\n'          "$CRON_SECRET"
+              printf 'MICROSOFT_CLIENT_ID=%s\n'  "$MICROSOFT_CLIENT_ID"
+              printf 'MICROSOFT_CLIENT_SECRET=%s\n' "$MICROSOFT_CLIENT_SECRET"
+              printf 'MICROSOFT_REDIRECT_URI=%s\n'  "$MICROSOFT_REDIRECT_URI"
+            } > .env.local.new
+            mv .env.local.new .env.local
+
             npm install
             npm run build
             pm2 restart lhmac
+
+            # Confirm the app came back up rather than assuming pm2 succeeded.
+            sleep 3
+            pm2 describe lhmac | grep -E "status" || true
