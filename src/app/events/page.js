@@ -371,18 +371,22 @@ export default function EventsPage() {
       </div>
 
       {editorOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 sm:px-6 bg-black/40">
-          <div className="w-full max-w-3xl rounded-[32px] border border-black/10 bg-white p-6 shadow-2xl">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="font-display font-bold text-xl">{events.some((item) => item.id === draft.id) ? 'Edit Event' : 'New Event'}</h3>
-              <p className="text-sm text-ink-muted">Your changes are saved to the club calendar database.</p>
+        // Capped to the dynamic viewport height with the fields in their own
+        // scroll area, so Save stays reachable on a phone. 100dvh rather than
+        // 100vh: iOS measures vh without the address bar, which pushes the
+        // footer off-screen.
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6">
+          <div className="flex w-full max-w-3xl max-h-[100dvh] sm:max-h-[calc(100dvh-3rem)] flex-col rounded-t-[32px] sm:rounded-[32px] border border-black/10 bg-white shadow-2xl">
+            <div className="shrink-0 flex items-start justify-between gap-4 border-b border-black/5 p-6 pb-4">
+              <div>
+                <h3 className="font-display font-bold text-xl">{events.some((item) => item.id === draft.id) ? 'Edit Event' : 'New Event'}</h3>
+                <p className="text-sm text-ink-muted">Your changes are saved to the club calendar database.</p>
+              </div>
+              <button type="button" onClick={() => setEditorOpen(false)} className="shrink-0 text-xs uppercase tracking-[0.2em] text-ink-muted">
+                Close
+              </button>
             </div>
-            <button type="button" onClick={() => setEditorOpen(false)} className="text-xs uppercase tracking-[0.2em] text-ink-muted">
-              Cancel
-            </button>
-          </div>
-          <div className="grid gap-4 mt-6 lg:grid-cols-2">
+          <div className="flex-1 overflow-y-auto p-6 grid gap-4 lg:grid-cols-2 content-start">
             <label className="block">
               <span className="text-sm font-medium text-ink">Title</span>
               <input
@@ -453,18 +457,23 @@ export default function EventsPage() {
               />
             </label>
           </div>
-          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setEditorOpen(false)}
-              className="rounded-3xl border border-black/10 bg-surface-card px-5 py-3 text-sm font-medium text-ink transition hover:bg-surface-muted"
-            >
-              Cancel
-            </button>
-            <button type="button" onClick={saveEvent} className="btn-primary rounded-3xl px-5 py-3 text-sm font-medium">
-              Save Event
-            </button>
+          {/* Pinned below the scroll area: Save is visible without scrolling,
+              whatever the form's height. pb-safe keeps it clear of the iPhone
+              home indicator. */}
+          <div className="shrink-0 border-t border-black/5 p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pb-6">
+            {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setEditorOpen(false)}
+                className="rounded-3xl border border-black/10 bg-surface-card px-5 py-3 text-sm font-medium text-ink transition hover:bg-surface-muted"
+              >
+                Cancel
+              </button>
+              <button type="button" onClick={saveEvent} className="btn-primary justify-center rounded-3xl px-5 py-3 text-sm font-medium">
+                Save Event
+              </button>
+            </div>
           </div>
         </div>
       </div>
