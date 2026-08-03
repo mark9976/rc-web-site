@@ -9,15 +9,26 @@ const transporterCache = new Map();
  * provider.
  */
 export function getTransporter(credentials) {
-  const key = `${credentials.id}:${credentials.smtp_host}:${credentials.smtp_port}:${credentials.username}`;
+  // The access token is part of the cache key: a pooled transport holds its
+  // credentials for the life of the connection, so reusing one across a token
+  // refresh would keep presenting the expired token until it failed.
+  const secretTag = credentials.accessToken ? `oauth:${credentials.accessToken.slice(-16)}` : 'basic';
+  const key = `${credentials.id}:${credentials.smtp_host}:${credentials.smtp_port}:${credentials.username}:${secretTag}`;
   if (transporterCache.has(key)) return transporterCache.get(key);
 
+  // A refreshed token means the previous transport is dead weight.
+  if (credentials.accessToken) clearTransporter(credentials.id);
+
   const port = credentials.smtp_port || 465;
+  const auth = credentials.accessToken
+    ? { type: 'OAuth2', user: credentials.username, accessToken: credentials.accessToken }
+    : { user: credentials.username, pass: credentials.password };
+
   const transporter = nodemailer.createTransport({
     host: credentials.smtp_host,
     port,
     secure: port === 465, // 587 negotiates STARTTLS instead
-    auth: { user: credentials.username, pass: credentials.password },
+    auth,
     pool: true,
     maxConnections: 3,
     maxMessages: 50,

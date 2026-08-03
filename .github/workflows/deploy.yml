@@ -22,6 +22,12 @@ jobs:
             git pull
             echo "EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}" > .env.local
             echo "EMAIL_DB_PATH=/home/mark/clubs/lhmac/email.db" >> .env.local
+            echo "CRON_SECRET=${{ secrets.CRON_SECRET }}" >> .env.local
+            # Microsoft OAuth2 for M365 mailboxes. MICROSOFT_REDIRECT_URI must
+            # byte-match a redirect URI registered in the Azure app.
+            echo "MICROSOFT_CLIENT_ID=${{ secrets.MICROSOFT_CLIENT_ID }}" >> .env.local
+            echo "MICROSOFT_CLIENT_SECRET=${{ secrets.MICROSOFT_CLIENT_SECRET }}" >> .env.local
+            echo "MICROSOFT_REDIRECT_URI=${{ secrets.MICROSOFT_REDIRECT_URI }}" >> .env.local
             npm install
             npm run build
             pm2 restart lhmac

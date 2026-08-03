@@ -38,8 +38,29 @@ export function setupEmailDb() {
   const schemaPath = path.join(process.cwd(), 'src', 'lib', 'email', 'emailSchema.sql');
   db.exec(fs.readFileSync(schemaPath, 'utf8'));
 
+  runEmailMigrations(db);
   seedSyncState(db);
   return db;
+}
+
+/** Columns added after the first release, for databases already on disk. */
+function runEmailMigrations(database) {
+  const addColumn = (table, column, definition) => {
+    const columns = database.prepare(`PRAGMA table_info(${table})`).all();
+    if (!columns.some((c) => c.name === column)) {
+      database.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+    }
+  };
+
+  // OAuth2 support. 'basic' keeps every existing mailbox working unchanged.
+  addColumn('email_mailboxes', 'auth_type', "TEXT DEFAULT 'basic'");
+  addColumn('email_mailboxes', 'oauth_provider', 'TEXT');
+  addColumn('email_mailboxes', 'oauth_access_token', 'TEXT');
+  addColumn('email_mailboxes', 'oauth_refresh_token', 'TEXT');
+  addColumn('email_mailboxes', 'oauth_token_expiry', 'TEXT');
+  // A real flag rather than a sentinel written into the expiry timestamp, so
+  // "token is stale" and "the grant was revoked" stay distinguishable.
+  addColumn('email_mailboxes', 'needs_reauth', 'INTEGER DEFAULT 0');
 }
 
 /**

@@ -1,9 +1,9 @@
 import { simpleParser } from 'mailparser';
+import { resolveMailboxAuth } from '@/lib/email/mailboxAuth';
 import { withImap, resolveFolders } from '@/lib/email/imapClient';
 import { computeThreadId, parseReferences } from '@/lib/email/threadUtils';
 import {
   listMailboxes,
-  getMailboxCredentials,
   insertMessage,
   highestUid,
   recordHighestUid,
@@ -147,7 +147,7 @@ export async function syncMailbox(mailboxId) {
   inFlight.add(mailboxId);
 
   try {
-    const credentials = getMailboxCredentials(mailboxId);
+    const credentials = await resolveMailboxAuth(mailboxId);
     if (!credentials) return { ok: false, error: 'Mailbox not found.' };
 
     const result = await withImap(credentials, async (client) => {
@@ -189,7 +189,7 @@ export async function deleteOnServer(target) {
   try {
     // Inside the try: decrypting the stored password can throw, and that must
     // not turn an already-successful local delete into a failed request.
-    const credentials = getMailboxCredentials(target.mailbox_id);
+    const credentials = await resolveMailboxAuth(target.mailbox_id);
     if (!credentials) return { ok: false, reason: 'Mailbox not found.' };
 
     return await withImap(credentials, async (client) => {

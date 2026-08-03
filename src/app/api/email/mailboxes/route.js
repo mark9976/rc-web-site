@@ -3,13 +3,20 @@ import { testImapConnection } from '@/lib/email/imapClient';
 import { testSmtpConnection } from '@/lib/email/smtpClient';
 import { encryptionConfigured } from '@/lib/email/encryption';
 import { handler, ok, fail } from '@/lib/email/routeHelpers';
+import { oauthConfigured, oauthConfig } from '@/lib/email/microsoftOAuth';
 
 export const dynamic = 'force-dynamic';
 
 const REQUIRED = ['email_address', 'display_name', 'imap_host', 'smtp_host', 'username', 'password'];
 
+// listMailboxes already excludes every secret column, tokens included; it
+// returns auth_type / oauth_provider / needs_reauth so the UI can label rows.
 export const GET = handler(async () =>
-  ok({ mailboxes: listMailboxes(), encryptionConfigured: encryptionConfigured() })
+  ok({
+    mailboxes: listMailboxes(),
+    encryptionConfigured: encryptionConfigured(),
+    microsoftOAuth: { configured: oauthConfigured(), redirectUri: oauthConfig().redirectUri || null },
+  })
 );
 
 export const POST = handler(async ({ request }) => {

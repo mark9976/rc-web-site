@@ -1,4 +1,5 @@
-import { getMailboxCredentials, pendingBlastRecipients, markRecipient, updateBlastStatus, refreshBlastCounts, getBlast } from '@/lib/email/emailStore';
+import { pendingBlastRecipients, markRecipient, updateBlastStatus, refreshBlastCounts, getBlast } from '@/lib/email/emailStore';
+import { resolveMailboxAuth } from '@/lib/email/mailboxAuth';
 import { sendMailWithRetry } from '@/lib/email/smtpClient';
 import { applyMergeFields, mergeContextForContact } from '@/lib/email/mergeFields';
 
@@ -28,7 +29,7 @@ export async function runBlast(blastId) {
     if (!blast) return { ok: false, error: 'Blast not found.' };
     if (blast.status === 'completed') return { ok: true, alreadyDone: true };
 
-    const credentials = getMailboxCredentials(blast.mailbox_id);
+    const credentials = await resolveMailboxAuth(blast.mailbox_id);
     if (!credentials) {
       updateBlastStatus(blastId, { status: 'failed' });
       return { ok: false, error: 'Sending mailbox no longer exists.' };

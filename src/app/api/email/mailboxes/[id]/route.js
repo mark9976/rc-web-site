@@ -13,6 +13,15 @@ export const PUT = handler(async ({ request, context }) => {
   const id = Number(context.params.id);
   const body = await request.json();
 
+  // The manual form cannot edit an OAuth2 mailbox: its host settings are fixed
+  // by Microsoft and it has no password, so saving one here would overwrite a
+  // working connection with blanks. Reconnect instead.
+  const existing = getMailbox(id);
+  if (!existing) return fail('Mailbox not found.', 404);
+  if (existing.auth_type === 'oauth2') {
+    return fail('This mailbox is connected through Microsoft. Use Reconnect to re-authorize it.', 400);
+  }
+
   const mailbox = updateMailbox(id, body);
   if (!mailbox) return fail('Mailbox not found.', 404);
 

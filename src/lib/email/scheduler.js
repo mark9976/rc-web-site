@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { syncAllMailboxes } from '@/lib/email/syncEngine';
-import { dueBlasts } from '@/lib/email/emailStore';
+import { dueBlasts, getOAuth2Mailboxes } from '@/lib/email/emailStore';
+import { getValidAccessToken } from '@/lib/email/microsoftOAuth';
 import { runBlast, isBlastRunning } from '@/lib/email/blastEngine';
 import { expireAllCheckins } from '@/lib/photoStorage';
 
@@ -34,6 +35,20 @@ export function startEmailScheduler() {
       }
     } catch (error) {
       console.error('[email] blast scheduler failed:', error.message);
+    }
+  });
+
+  // OAuth2 access tokens last about an hour. Refreshing every 30 minutes keeps
+  // one available between syncs and surfaces a revoked grant promptly, rather
+  // than at the moment somebody tries to send.
+  cron.schedule('*/30 * * * *', async () => {
+    for (const mailbox of getOAuth2Mailboxes()) {
+      try {
+        await getValidAccessToken(mailbox);
+      } catch (error) {
+        // getValidAccessToken already flags the mailbox for reconnection.
+        console.error(`[email] OAuth2 refresh failed for ${mailbox.email_address}:`, error.message);
+      }
     }
   });
 

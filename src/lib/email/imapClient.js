@@ -2,13 +2,23 @@ import { ImapFlow } from 'imapflow';
 
 const CONNECT_TIMEOUT_MS = 20000;
 
-/** Builds a connection for a mailbox row that already has a plaintext password. */
+/**
+ * Builds a connection for a mailbox whose secret has already been resolved:
+ * either a plaintext password, or an `accessToken` for OAuth2 mailboxes.
+ *
+ * Passing `accessToken` instead of `pass` makes imapflow negotiate XOAUTH2,
+ * which is the only way into Microsoft 365 now that basic auth is off.
+ */
 export function createImapClient(credentials) {
+  const auth = credentials.accessToken
+    ? { user: credentials.username, accessToken: credentials.accessToken }
+    : { user: credentials.username, pass: credentials.password };
+
   return new ImapFlow({
     host: credentials.imap_host,
     port: credentials.imap_port || 993,
     secure: (credentials.imap_port || 993) === 993,
-    auth: { user: credentials.username, pass: credentials.password },
+    auth,
     // imapflow logs verbosely at info level; keep the app log readable.
     logger: false,
     socketTimeout: CONNECT_TIMEOUT_MS,

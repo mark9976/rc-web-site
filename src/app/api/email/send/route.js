@@ -1,4 +1,5 @@
-import { getMailboxCredentials, getMessage, insertMessage } from '@/lib/email/emailStore';
+import { getMessage, insertMessage } from '@/lib/email/emailStore';
+import { resolveMailboxAuth } from '@/lib/email/mailboxAuth';
 import { sendMailWithRetry, htmlToPlainText } from '@/lib/email/smtpClient';
 import { computeThreadId } from '@/lib/email/threadUtils';
 import { handler, ok, fail } from '@/lib/email/routeHelpers';
@@ -29,7 +30,7 @@ export const POST = handler(async ({ request }) => {
   if (!mailboxId) return fail('Choose a mailbox to send from.');
   if (to.length === 0) return fail('Add at least one recipient.');
 
-  const credentials = getMailboxCredentials(mailboxId);
+  const credentials = await resolveMailboxAuth(mailboxId);
   if (!credentials) return fail('Mailbox not found.', 404);
 
   const attachments = [];

@@ -18,7 +18,8 @@ const unjson = (value, fallback = []) => {
 // The password column never leaves this module in plaintext except through
 // getMailboxCredentials, which the IMAP/SMTP clients use.
 const MAILBOX_PUBLIC =
-  'id, email_address, display_name, imap_host, imap_port, smtp_host, smtp_port, username, is_default, last_sync_at, last_sync_error, created_at';
+  'id, email_address, display_name, imap_host, imap_port, smtp_host, smtp_port, username, is_default, ' +
+  'last_sync_at, last_sync_error, created_at, auth_type, oauth_provider, needs_reauth';
 
 export function listMailboxes() {
   return emailDb().prepare(`SELECT ${MAILBOX_PUBLIC} FROM email_mailboxes ORDER BY is_default DESC, display_name ASC`).all();
@@ -38,7 +39,115 @@ export function getDefaultMailbox() {
 export function getMailboxCredentials(id) {
   const row = emailDb().prepare('SELECT * FROM email_mailboxes WHERE id = ?').get(id);
   if (!row) return null;
+
+  // OAuth2 mailboxes hold a placeholder in `password` (the column is NOT NULL
+  // and predates OAuth); they authenticate with an access token instead.
+  if (row.auth_type === 'oauth2') {
+    return { ...row, password: null };
+  }
   return { ...row, password: decrypt(row.password) };
+}
+
+/** Decrypted OAuth2 tokens for one mailbox. Server-side callers only. */
+export function getMailboxOAuth(id) {
+  const row = emailDb().prepare('SELECT * FROM email_mailboxes WHERE id = ?').get(id);
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    auth_type: row.auth_type,
+    oauth_provider: row.oauth_provider,
+    oauth_token_expiry: row.oauth_token_expiry,
+    needs_reauth: Boolean(row.needs_reauth),
+    access_token: row.oauth_access_token ? decrypt(row.oauth_access_token) : null,
+    refresh_token: row.oauth_refresh_token ? decrypt(row.oauth_refresh_token) : null,
+  };
+}
+
+export function getOAuth2Mailboxes() {
+  return emailDb()
+    .prepare(`SELECT ${MAILBOX_PUBLIC} FROM email_mailboxes WHERE auth_type = 'oauth2'`)
+    .all();
+}
+
+/** Persists a refreshed token set and clears any reconnect flag. */
+export function updateMailboxTokens(id, { accessToken, refreshToken, expiresAt }) {
+  emailDb()
+    .prepare(
+      `UPDATE email_mailboxes SET
+         oauth_access_token = ?, oauth_refresh_token = ?, oauth_token_expiry = ?,
+         needs_reauth = 0
+       WHERE id = ?`
+    )
+    .run(encrypt(accessToken), refreshToken ? encrypt(refreshToken) : null, expiresAt, id);
+}
+
+export function markMailboxNeedsReauth(id, reason = 'Authorization expired. Reconnect the mailbox.') {
+  emailDb()
+    .prepare('UPDATE email_mailboxes SET needs_reauth = 1, last_sync_error = ? WHERE id = ?')
+    .run(reason, id);
+}
+
+/**
+ * Creates or re-links a Microsoft mailbox.
+ *
+ * Reconnecting an address that already exists updates its tokens in place
+ * rather than failing the UNIQUE constraint, which is what "Reconnect" needs.
+ * The id is left to AUTOINCREMENT — the column is an INTEGER rowid alias, so a
+ * generated string id would be rejected outright.
+ */
+export function upsertOAuth2Mailbox({ email, displayName, provider = 'microsoft', accessToken, refreshToken, expiresAt }) {
+  const db = emailDb();
+  const address = email.toLowerCase();
+  const existing = db.prepare('SELECT id FROM email_mailboxes WHERE email_address = ?').get(address);
+
+  if (existing) {
+    db.prepare(
+      `UPDATE email_mailboxes SET
+         display_name = ?, username = ?, auth_type = 'oauth2', oauth_provider = ?,
+         oauth_access_token = ?, oauth_refresh_token = ?, oauth_token_expiry = ?,
+         imap_host = 'outlook.office365.com', imap_port = 993,
+         smtp_host = 'smtp.office365.com', smtp_port = 587,
+         needs_reauth = 0, last_sync_error = NULL
+       WHERE id = ?`
+    ).run(
+      displayName || address,
+      address,
+      provider,
+      encrypt(accessToken),
+      refreshToken ? encrypt(refreshToken) : null,
+      expiresAt,
+      existing.id
+    );
+    return { mailbox: getMailbox(existing.id), created: false };
+  }
+
+  const isFirst = db.prepare('SELECT COUNT(*) AS count FROM email_mailboxes').get().count === 0;
+  const info = db
+    .prepare(
+      `INSERT INTO email_mailboxes
+        (email_address, display_name, imap_host, imap_port, smtp_host, smtp_port,
+         username, password, auth_type, oauth_provider, oauth_access_token,
+         oauth_refresh_token, oauth_token_expiry, is_default, needs_reauth)
+       VALUES (?, ?, 'outlook.office365.com', 993, 'smtp.office365.com', 587,
+               ?, ?, 'oauth2', ?, ?, ?, ?, ?, 0)`
+    )
+    .run(
+      address,
+      displayName || address,
+      address,
+      // `password` is NOT NULL and cannot be dropped without rebuilding the
+      // table; an encrypted empty string keeps the constraint satisfied and
+      // never reaches an auth attempt.
+      encrypt(''),
+      provider,
+      encrypt(accessToken),
+      refreshToken ? encrypt(refreshToken) : null,
+      expiresAt,
+      isFirst ? 1 : 0
+    );
+
+  return { mailbox: getMailbox(info.lastInsertRowid), created: true };
 }
 
 function clearOtherDefaults(db, keepId) {
