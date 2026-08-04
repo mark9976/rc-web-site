@@ -274,15 +274,19 @@ export default function AdminPage() {
     }
 
     const who = `${result.user.name} (username: ${result.user.username})`;
+    // Their chosen name may have been claimed between applying and approval.
+    const renamed = result.usernameChangedFrom
+      ? ` Note: “${result.usernameChangedFrom}” had been taken, so they were given “${result.user.username}”.`
+      : '';
     if (result.email?.sent) {
-      setApplicationMessage(`Approved ${who}. Their login details were emailed to them.`);
+      setApplicationMessage(`Approved ${who}. Their login details were emailed to them.${renamed}`);
       setApplicationError('');
     } else {
       // The account exists either way, so show the password for hand-off
       // rather than leaving the admin with no way to reach the new member.
       setApplicationMessage(
         `Approved ${who}, but the welcome email could not be sent${result.email?.reason ? `: ${result.email.reason}` : '.'} ` +
-        `Give them this temporary password yourself: ${result.temporaryPassword ?? '(unavailable)'}`
+        `Give them this temporary password yourself: ${result.temporaryPassword ?? '(unavailable)'}${renamed}`
       );
       setApplicationError('');
     }
@@ -648,6 +652,12 @@ export default function AdminPage() {
                         AMA #{application.amaNumber} · {application.email} · {application.phone}
                       </p>
                       <p className="text-xs text-ink-light mt-1">{application.address}</p>
+                      {application.username ? (
+                        <p className="text-xs text-ink-muted mt-1">
+                          Requested username:{' '}
+                          <span className="font-mono text-ink">{application.username}</span>
+                        </p>
+                      ) : null}
                     </div>
                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold shrink-0 ${application.status === 'pending' ? 'bg-field-green/10 text-field-green' : 'bg-surface-muted text-ink-muted'}`}>
                       {application.status}

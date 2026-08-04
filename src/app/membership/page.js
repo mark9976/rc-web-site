@@ -8,6 +8,7 @@ import { UserPlus, GraduationCap, ShieldCheck, Mail, Home, CalendarDays, Externa
 
 const initialForm = {
   name: '',
+  username: '',
   phone: '',
   email: '',
   address: '',
@@ -30,8 +31,12 @@ export default function MembershipPage() {
     setError('');
     setSuccess('');
 
-    if (!form.name || !form.phone || !form.email || !form.address || !form.amaNumber) {
+    if (!form.name || !form.username || !form.phone || !form.email || !form.address || !form.amaNumber) {
       setError('Please complete all required fields before requesting access.');
+      return;
+    }
+    if (!/^[a-z0-9._-]{3,40}$/i.test(form.username)) {
+      setError('Username must be 3–40 characters, using letters, numbers, dots, dashes or underscores.');
       return;
     }
 
@@ -67,6 +72,21 @@ export default function MembershipPage() {
                   className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
                   placeholder="Jane Doe"
                 />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-ink">Choose a username</span>
+                <input
+                  value={form.username}
+                  onChange={handleChange('username')}
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
+                  placeholder="janedoe"
+                />
+                <span className="mt-1 block text-xs text-ink-light">
+                  This is what you will sign in with. Letters, numbers, dots, dashes and underscores.
+                </span>
               </label>
               <label className="block">
                 <span className="text-sm font-medium text-ink">Phone</span>

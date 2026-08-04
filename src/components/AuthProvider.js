@@ -139,6 +139,7 @@ export function AuthProvider({ children }) {
       return {
         success: true,
         user: data.result?.user,
+        usernameChangedFrom: data.result?.usernameChangedFrom,
         email: data.result?.email,
         // Present only when the welcome email could not be sent.
         temporaryPassword: data.result?.temporaryPassword,

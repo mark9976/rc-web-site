@@ -405,6 +405,9 @@ function runMigrations(database) {
   addColumn('users', 'isInstructor', 'INTEGER DEFAULT 0');
   addColumn('users', 'instructorNote', 'TEXT');
   addColumn('users', 'officerTitle', 'TEXT');
+  // Applicants choose their own username; kept on the application so the
+  // approval creates the account they actually asked for.
+  addColumn('member_applications', 'username', 'TEXT');
   // Multi-day events. NULL means a single-day event, which is most of them.
   addColumn('events', 'endDate', 'TEXT');
   // Optional poster/photo and an external link for an event.
@@ -795,10 +798,31 @@ export function insertApplication(application) {
   const submittedAt = new Date().toISOString();
   getDb()
     .prepare(
-      'INSERT INTO member_applications (id, name, phone, email, address, amaNumber, reason, status, submittedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO member_applications (id, name, username, phone, email, address, amaNumber, reason, status, submittedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(id, application.name, application.phone, application.email, application.address, application.amaNumber, application.reason || '', 'pending', submittedAt);
+    .run(id, application.name, application.username || null, application.phone, application.email, application.address, application.amaNumber, application.reason || '', 'pending', submittedAt);
   return getDb().prepare('SELECT * FROM member_applications WHERE id = ?').get(id);
+}
+
+/**
+ * Whether a username is free.
+ *
+ * Checks pending applications as well as existing accounts: two people can
+ * apply before either is approved, and without this both would be told the
+ * name was available and the second approval would fail on the UNIQUE index.
+ */
+export function isUsernameAvailable(username, { exceptApplicationId = null } = {}) {
+  const db = getDb();
+  const taken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(username);
+  if (taken) return false;
+
+  const claimed = db
+    .prepare(
+      `SELECT 1 FROM member_applications
+       WHERE username = ? COLLATE NOCASE AND status = 'pending' AND id != ?`
+    )
+    .get(username, exceptApplicationId ?? '');
+  return !claimed;
 }
 
 /**
@@ -829,9 +853,14 @@ export function reviewApplication(id, action) {
     .run(status, reviewedAt, 'admin', id);
 
   if (status === 'approved') {
-    const usernameBase = uniqueUsername(
-      application.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase() || `member${Date.now()}`
-    );
+    // Use the name the applicant chose. It was checked as free at submission,
+    // but time has passed — uniqueUsername is the backstop if it was taken
+    // since, and the caller reports any change so nobody is told the wrong one.
+    const requested =
+      application.username ||
+      application.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase() ||
+      `member${Date.now()}`;
+    const usernameBase = uniqueUsername(requested);
     const userId = `member-${Date.now()}`;
     // One-time and random rather than a shared word: it travels by email and
     // is the only thing guarding the account until they set their own.
@@ -857,6 +886,8 @@ export function reviewApplication(id, action) {
       application: { ...application, status, reviewedAt },
       user: serializeUser(user),
       temporaryPassword,
+      // Set when the requested name had been taken in the meantime.
+      usernameChangedFrom: usernameBase !== requested ? requested : null,
     };
   }
   return { application: { ...application, status, reviewedAt } };

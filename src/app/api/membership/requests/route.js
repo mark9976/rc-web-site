@@ -59,6 +59,7 @@ export async function POST(request) {
     result: {
       application: result.application,
       user: result.user,
+      usernameChangedFrom: result.usernameChangedFrom,
       email,
       temporaryPassword: email && !email.sent ? result.temporaryPassword : undefined,
     },
