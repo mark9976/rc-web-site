@@ -82,7 +82,12 @@ export default function HomePage() {
             RC flying at Mammoth Park since 1964.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-4">
-            <Link href="/membership/" className="btn-primary bg-white text-field-darkgreen hover:bg-white/90">
+            {/* Straight to the form: someone who has decided to join should not
+                have to find it. "Join the Club" still leads to the overview. */}
+            <Link href="/membership/apply/" className="btn-primary bg-white text-field-darkgreen hover:bg-white/90">
+              Membership Application
+            </Link>
+            <Link href="/membership/" className="btn-secondary border-white text-white hover:bg-white hover:text-field-darkgreen">
               Join the Club
             </Link>
             <Link href="/fields/" className="btn-secondary border-white text-white hover:bg-white hover:text-field-darkgreen">
