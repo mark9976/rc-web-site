@@ -251,6 +251,14 @@ function getDb() {
       content BLOB
     )`).run();
 
+    // Small key/value store for admin-configurable site settings.
+    db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updatedAt TEXT,
+      updatedBy TEXT
+    )`).run();
+
     // Admin-managed event categories. Colour is stored as a hex value and
     // applied inline: a Tailwind class name assembled from database content
     // would be stripped by the compiler, which only keeps classes it can see
@@ -744,6 +752,23 @@ export function getClubConfig() {
     stats: { memberCount, instructorCount },
     officers: getOfficers().map((officer) => ({ name: officer.name, title: officer.officerTitle })),
   };
+}
+
+// ---- app settings ---------------------------------------------------------
+
+export function getSetting(key, fallback = null) {
+  const row = getDb().prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  return row?.value ?? fallback;
+}
+
+export function setSetting(key, value, updatedBy = 'system') {
+  getDb()
+    .prepare(
+      `INSERT INTO app_settings (key, value, updatedAt, updatedBy) VALUES (?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy`
+    )
+    .run(key, value === null || value === undefined ? null : String(value), new Date().toISOString(), updatedBy);
+  return getSetting(key);
 }
 
 export function getDashboardCounts() {

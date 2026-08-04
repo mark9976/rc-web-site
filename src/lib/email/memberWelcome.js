@@ -1,6 +1,25 @@
-import { getDefaultMailbox } from '@/lib/email/emailStore';
+import { getDefaultMailbox, getMailbox } from '@/lib/email/emailStore';
 import { resolveMailboxAuth } from '@/lib/email/mailboxAuth';
 import { sendMailWithRetry } from '@/lib/email/smtpClient';
+import { getSetting } from '@/lib/photoStorage';
+
+export const MEMBER_EMAIL_MAILBOX_SETTING = 'memberWelcomeMailboxId';
+
+/**
+ * The mailbox new-member emails go out from.
+ *
+ * An admin can pick one explicitly; otherwise the default mailbox is used, so
+ * this keeps working on an install that never sets it.
+ */
+export function getMemberEmailMailbox() {
+  const configuredId = getSetting(MEMBER_EMAIL_MAILBOX_SETTING);
+  if (configuredId) {
+    const chosen = getMailbox(Number(configuredId));
+    if (chosen) return chosen;
+    // Fall through when the chosen mailbox has since been deleted.
+  }
+  return getDefaultMailbox();
+}
 
 /** Values land in an HTML email, so escape anything that came from a form. */
 function escapeHtml(value) {
@@ -71,9 +90,15 @@ function buildText({ name, username, password, siteUrl }) {
  * pass the credentials on by hand if needed.
  */
 export async function sendMemberWelcomeEmail({ to, name, username, password, siteUrl }) {
-  const mailbox = getDefaultMailbox();
+  const mailbox = getMemberEmailMailbox();
   if (!mailbox) {
     return { sent: false, reason: 'No club mailbox is configured, so no email could be sent.' };
+  }
+  if (mailbox.needs_reauth) {
+    return {
+      sent: false,
+      reason: `${mailbox.email_address} needs reconnecting on the email settings page before it can send.`,
+    };
   }
 
   try {
