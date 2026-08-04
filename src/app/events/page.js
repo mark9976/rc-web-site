@@ -5,17 +5,55 @@ import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
 import PageShell from '@/components/PageShell';
 import { CalendarDays, MapPin, Clock, Users, Edit, Plus, ShieldCheck, User, Trash2, ExternalLink, Link as LinkIcon, Upload, Image as ImageIcon } from 'lucide-react';
-import { formatDateDisplay, normalizeDateString } from '@/lib/dateUtils';
+import { formatDateDisplay, normalizeDateString, parseDateString } from '@/lib/dateUtils';
 import { readError } from '@/lib/apiClient';
 
 const guestUser = { id: 'guest', name: 'Visitor', role: 'guest' };
 
-const typeColors = {
-  Meeting: 'bg-field-green/10 text-field-green',
-  Event: 'bg-sky/10 text-sky-deep',
-  'Float Fly': 'bg-blue-100 text-blue-700',
-  'Swap Meet': 'bg-flyday-maybe/10 text-flyday-maybe',
-};
+const DEFAULT_TYPE_COLOR = '#6B7280';
+
+/**
+ * Types are admin-managed, so their colours arrive from the database and are
+ * applied inline — Tailwind only emits classes it can see in the source, so a
+ * class name built from data would never make it into the stylesheet.
+ */
+function typeBadgeStyle(color) {
+  const hex = color || DEFAULT_TYPE_COLOR;
+  return { backgroundColor: `${hex}1a`, color: hex };
+}
+
+/** Inclusive list of YYYY-MM-DD keys an event covers. */
+function datesCovered(event) {
+  const start = normalizeDateString(event.date);
+  if (!start) return [];
+  const end = normalizeDateString(event.endDate);
+  if (!end || end <= start) return [start];
+
+  const days = [];
+  const cursor = parseDateString(start);
+  const last = parseDateString(end);
+  // Walk with local Date arithmetic and re-serialise from local parts, so no
+  // UTC conversion ever enters the loop.
+  while (cursor <= last && days.length < 366) {
+    days.push(normalizeDateString(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+/** "August 15" or "August 15 – 17" / "August 30 – September 2". */
+function formatEventDateRange(event) {
+  const start = formatDateDisplay(event.date);
+  if (!event.endDate) return start;
+
+  const startParsed = parseDateString(event.date);
+  const endParsed = parseDateString(event.endDate);
+  if (!startParsed || !endParsed) return start;
+
+  const sameMonth =
+    startParsed.getMonth() === endParsed.getMonth() && startParsed.getFullYear() === endParsed.getFullYear();
+  return sameMonth ? `${start} – ${endParsed.getDate()}` : `${start} – ${formatDateDisplay(event.endDate)}`;
+}
 
 const roleLabels = {
   guest: { title: 'Visitor', description: 'View-only access. Sign in as a member or admin to manage events.', icon: User },
@@ -32,6 +70,7 @@ function createEmptyEvent(user) {
     id: Date.now(),
     title: '',
     date: '',
+    endDate: '',
     startTime: '',
     endTime: '',
     time: '',
@@ -122,6 +161,7 @@ export default function EventsPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState(createEmptyEvent(activeUser));
   const [error, setError] = useState('');
+  const [eventTypes, setEventTypes] = useState([]);
   const [photoFile, setPhotoFile] = useState(null);
   const [removePhoto, setRemovePhoto] = useState(false);
 
@@ -139,6 +179,13 @@ export default function EventsPage() {
     };
 
     loadEvents();
+
+    // Categories are admin-managed, so the editor and the badges read them
+    // from the server rather than a hardcoded list.
+    fetch('/api/event-types')
+      .then((res) => (res.ok ? res.json() : { eventTypes: [] }))
+      .then((data) => setEventTypes(data.eventTypes ?? []))
+      .catch(() => setEventTypes([]));
   }, []);
 
   useEffect(() => {
@@ -158,10 +205,11 @@ export default function EventsPage() {
   const monthKey = `${currentMonth.getFullYear()}-${currentMonth.getMonth()}`;
   const calendarDays = useMemo(() => getCalendarDays(currentMonth.getFullYear(), currentMonth.getMonth()), [currentMonth]);
   const eventsByDate = useMemo(() => {
+    // A multi-day event appears on every day it covers, not just its start.
     return events.reduce((acc, event) => {
-      const key = getDateKey(event.date);
-      if (!key) return acc;
-      acc[key] = acc[key] ? [...acc[key], event] : [event];
+      for (const key of datesCovered(event)) {
+        acc[key] = acc[key] ? [...acc[key], event] : [event];
+      }
       return acc;
     }, {});
   }, [events]);
@@ -409,10 +457,15 @@ export default function EventsPage() {
                 onChange={(event) => setDraft({ ...draft, type: event.target.value })}
                 className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
               >
-                <option>Meeting</option>
-                <option>Event</option>
-                <option>Float Fly</option>
-                <option>Swap Meet</option>
+                {/* Admins manage this list from the dashboard. The event's own
+                    type is included even if it has since been removed, so
+                    editing an old event cannot silently recategorise it. */}
+                {eventTypes.map((type) => (
+                  <option key={type.id} value={type.name}>{type.name}</option>
+                ))}
+                {draft.type && !eventTypes.some((type) => type.name === draft.type) ? (
+                  <option value={draft.type}>{draft.type}</option>
+                ) : null}
               </select>
             </label>
             <label className="block">
@@ -423,6 +476,19 @@ export default function EventsPage() {
                 onChange={(event) => setDraft({ ...draft, date: event.target.value })}
                 className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
               />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-ink">End date (optional)</span>
+              <input
+                type="date"
+                value={draft.endDate ?? ''}
+                min={draft.date || undefined}
+                onChange={(event) => setDraft({ ...draft, endDate: event.target.value })}
+                className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
+              />
+              <span className="mt-1 block text-xs text-ink-light">
+                For events running more than one day. Leave blank for a single day.
+              </span>
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
@@ -558,8 +624,13 @@ export default function EventsPage() {
             >
               <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                 <div className="sm:w-32 shrink-0">
-                  <p className="font-display font-bold text-lg text-ink">{formatDateDisplay(event.date)}</p>
+                  <p className="font-display font-bold text-lg text-ink">{formatEventDateRange(event)}</p>
                   <p className="text-xs text-ink-muted">{event.time}</p>
+                  {event.endDate ? (
+                    <p className="mt-1 inline-block rounded-full bg-field-green/10 px-2 py-0.5 text-[10px] font-semibold text-field-green">
+                      {datesCovered(event).length} days
+                    </p>
+                  ) : null}
                 </div>
 
                 {/* Poster thumbnail, only rendered when the event has one so the
@@ -584,7 +655,10 @@ export default function EventsPage() {
                 <div className="flex-1">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <span className={`inline-block text-xs font-display font-bold uppercase tracking-wider px-2 py-1 rounded mb-2 ${typeColors[event.type] || 'bg-surface-muted text-ink-muted'}`}>
+                      <span
+                        className="inline-block text-xs font-display font-bold uppercase tracking-wider px-2 py-1 rounded mb-2"
+                        style={typeBadgeStyle(eventTypes.find((type) => type.name === event.type)?.color)}
+                      >
                         {event.type}
                       </span>
                       <h3 className="font-display font-bold text-xl text-ink group-hover:text-field-green transition-colors flex items-center gap-2">

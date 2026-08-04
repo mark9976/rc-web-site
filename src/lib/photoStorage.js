@@ -44,6 +44,7 @@ function seedInitialData(database) {
     insertEvent.run('event-4', 'Swap Meet', '2026-09-06', '09:00', '12:00', '9:00 AM – 12:00 PM', 'Mammoth Park Pavilion', 'Swap Meet', 'Buy, sell, and trade RC equipment.', 'admin', 'Club Admin', now, now);
   }
 
+  seedEventTypes(database);
   seedLogoImage(database);
 
   const statusCount = database.prepare('SELECT COUNT(*) AS count FROM field_status').get().count;
@@ -62,6 +63,51 @@ function seedInitialData(database) {
  * upload it. Seeding from the repo file means every instance has it on first
  * start. Only fills an empty slot, so an admin upload is never overwritten.
  */
+/**
+ * Populates the event categories on first run.
+ *
+ * Also picks up any type already present on an existing event, so a database
+ * that predates this table does not end up with events whose category is
+ * missing from the list.
+ */
+function seedEventTypes(database) {
+  const defaults = [
+    ['Meeting', '#2D5A27'],
+    ['Event', '#4A8FCA'],
+    ['Float Fly', '#1D6FB8'],
+    ['Swap Meet', '#E8890C'],
+    ['Fun Fly', '#2E7D32'],
+    ['Contest', '#8E44AD'],
+  ];
+
+  const existingNames = new Set(
+    database.prepare('SELECT name FROM event_types').all().map((row) => row.name)
+  );
+  const inUse = database
+    .prepare("SELECT DISTINCT type FROM events WHERE type IS NOT NULL AND type != ''")
+    .all()
+    .map((row) => row.type);
+
+  const insert = database.prepare(
+    'INSERT OR IGNORE INTO event_types (id, name, color, sortOrder, createdAt) VALUES (?, ?, ?, ?, ?)'
+  );
+  const now = new Date().toISOString();
+  let order = existingNames.size;
+
+  for (const [name, color] of defaults) {
+    if (existingNames.has(name)) continue;
+    insert.run(`etype-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name, color, order, now);
+    existingNames.add(name);
+    order += 1;
+  }
+  for (const name of inUse) {
+    if (existingNames.has(name)) continue;
+    insert.run(`etype-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, '#6B7280', order, now);
+    existingNames.add(name);
+    order += 1;
+  }
+}
+
 function seedLogoImage(database) {
   const existing = database.prepare("SELECT 1 FROM site_images WHERE slot = 'logo'").get();
   if (existing) return;
@@ -203,6 +249,18 @@ function getDb() {
       uploadedBy TEXT,
       uploadedAt TEXT,
       content BLOB
+    )`).run();
+
+    // Admin-managed event categories. Colour is stored as a hex value and
+    // applied inline: a Tailwind class name assembled from database content
+    // would be stripped by the compiler, which only keeps classes it can see
+    // in the source.
+    db.prepare(`CREATE TABLE IF NOT EXISTS event_types (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT NOT NULL DEFAULT '#2D5A27',
+      sortOrder INTEGER DEFAULT 0,
+      createdAt TEXT
     )`).run();
 
     // ---- RC Club Connect (iOS app) ----------------------------------------
@@ -347,6 +405,8 @@ function runMigrations(database) {
   addColumn('users', 'isInstructor', 'INTEGER DEFAULT 0');
   addColumn('users', 'instructorNote', 'TEXT');
   addColumn('users', 'officerTitle', 'TEXT');
+  // Multi-day events. NULL means a single-day event, which is most of them.
+  addColumn('events', 'endDate', 'TEXT');
   // Optional poster/photo and an external link for an event.
   addColumn('events', 'photo', 'BLOB');
   addColumn('events', 'photoFilename', 'TEXT');
@@ -777,13 +837,70 @@ export function reviewApplication(id, action) {
 // event poster on every calendar load. `hasPhoto` is enough for the UI to know
 // whether to request /api/events/photo/<id>.
 const EVENT_COLUMNS = `
-  id, title, date, startTime, endTime, time, location, type, desc,
+  id, title, date, endDate, startTime, endTime, time, location, type, desc,
   ownerId, ownerName, link, photoFilename, createdAt, updatedAt,
   CASE WHEN photo IS NULL THEN 0 ELSE 1 END AS hasPhoto`;
 
 function toEvent(event) {
   if (!event) return event;
-  return { ...event, date: normalizeDateString(event.date), hasPhoto: Boolean(event.hasPhoto) };
+  const date = normalizeDateString(event.date);
+  const endDate = normalizeDateString(event.endDate);
+  return {
+    ...event,
+    date,
+    // An end date equal to (or before) the start is just a single-day event;
+    // normalising it away here keeps every consumer from special-casing it.
+    endDate: endDate && endDate > date ? endDate : null,
+    hasPhoto: Boolean(event.hasPhoto),
+  };
+}
+
+// ---- event types ----------------------------------------------------------
+
+export function getEventTypes() {
+  return getDb()
+    .prepare('SELECT id, name, color, sortOrder FROM event_types ORDER BY sortOrder ASC, name ASC')
+    .all();
+}
+
+export function getEventTypeByName(name) {
+  return getDb().prepare('SELECT * FROM event_types WHERE name = ? COLLATE NOCASE').get(name);
+}
+
+export function insertEventType({ name, color }) {
+  const db = getDb();
+  const id = `etype-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const nextOrder = (db.prepare('SELECT MAX(sortOrder) AS max FROM event_types').get().max ?? -1) + 1;
+  db.prepare('INSERT INTO event_types (id, name, color, sortOrder, createdAt) VALUES (?, ?, ?, ?, ?)')
+    .run(id, name, color, nextOrder, new Date().toISOString());
+  return db.prepare('SELECT id, name, color, sortOrder FROM event_types WHERE id = ?').get(id);
+}
+
+/**
+ * Renaming a type also relabels the events using it, so existing events keep
+ * their category instead of pointing at a name that no longer exists.
+ */
+export function updateEventType(id, { name, color }) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM event_types WHERE id = ?').get(id);
+  if (!existing) return null;
+
+  db.transaction(() => {
+    db.prepare('UPDATE event_types SET name = ?, color = ? WHERE id = ?').run(name, color, id);
+    if (name !== existing.name) {
+      db.prepare('UPDATE events SET type = ? WHERE type = ?').run(name, existing.name);
+    }
+  })();
+
+  return db.prepare('SELECT id, name, color, sortOrder FROM event_types WHERE id = ?').get(id);
+}
+
+export function countEventsOfType(name) {
+  return getDb().prepare('SELECT COUNT(*) AS count FROM events WHERE type = ?').get(name).count;
+}
+
+export function deleteEventType(id) {
+  return getDb().prepare('DELETE FROM event_types WHERE id = ?').run(id);
 }
 
 export function getEvents() {
@@ -811,15 +928,19 @@ export function getEventPhoto(id) {
 export function upsertEvent(event) {
   const db = getDb();
   const normalizedDate = normalizeDateString(event.date);
+  const rawEnd = normalizeDateString(event.endDate);
+  // Only keep an end date that is genuinely later than the start.
+  const normalizedEndDate = rawEnd && rawEnd > normalizedDate ? rawEnd : null;
   const existing = getEventById(event.id);
   const now = new Date().toISOString();
   const link = event.link || null;
 
   if (existing) {
     db.prepare(
-      `UPDATE events SET title = ?, date = ?, startTime = ?, endTime = ?, time = ?, location = ?,
-         type = ?, desc = ?, ownerId = ?, ownerName = ?, link = ?, updatedAt = ? WHERE id = ?`
-    ).run(event.title, normalizedDate, event.startTime, event.endTime, event.time, event.location, event.type, event.desc, event.ownerId, event.ownerName, link, now, event.id);
+      `UPDATE events SET title = ?, date = ?, endDate = ?, startTime = ?, endTime = ?, time = ?,
+         location = ?, type = ?, desc = ?, ownerId = ?, ownerName = ?, link = ?, updatedAt = ?
+       WHERE id = ?`
+    ).run(event.title, normalizedDate, normalizedEndDate, event.startTime, event.endTime, event.time, event.location, event.type, event.desc, event.ownerId, event.ownerName, link, now, event.id);
 
     if (event.removePhoto) {
       db.prepare('UPDATE events SET photo = NULL, photoFilename = NULL WHERE id = ?').run(event.id);
@@ -831,12 +952,12 @@ export function upsertEvent(event) {
   }
 
   db.prepare(
-    `INSERT INTO events (id, title, date, startTime, endTime, time, location, type, desc,
+    `INSERT INTO events (id, title, date, endDate, startTime, endTime, time, location, type, desc,
        ownerId, ownerName, link, photo, photoFilename, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    event.id, event.title, normalizedDate, event.startTime, event.endTime, event.time,
-    event.location, event.type, event.desc, event.ownerId, event.ownerName, link,
+    event.id, event.title, normalizedDate, normalizedEndDate, event.startTime, event.endTime,
+    event.time, event.location, event.type, event.desc, event.ownerId, event.ownerName, link,
     event.photo ?? null, event.photoFilename ?? null, now, now
   );
   return getEventById(event.id);

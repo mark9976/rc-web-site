@@ -69,6 +69,16 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Missing or invalid required event fields.' }, { status: 400 });
   }
 
+  // Multi-day events carry an end date. Compared as YYYY-MM-DD strings, which
+  // sort correctly and avoid the timezone traps of parsing them into Dates.
+  const normalizedEndDate = normalizeDateString(body.endDate);
+  if (body.endDate && !normalizedEndDate) {
+    return NextResponse.json({ error: 'The end date is not a valid date.' }, { status: 400 });
+  }
+  if (normalizedEndDate && normalizedEndDate < normalizedDate) {
+    return NextResponse.json({ error: 'The end date cannot be before the start date.' }, { status: 400 });
+  }
+
   const { link, error: linkError } = cleanLink(body.link);
   if (linkError) return NextResponse.json({ error: linkError }, { status: 400 });
 
@@ -91,6 +101,7 @@ export async function POST(request) {
   const event = upsertEvent({
     ...body,
     date: normalizedDate,
+    endDate: normalizedEndDate,
     link,
     photo,
     photoFilename,
