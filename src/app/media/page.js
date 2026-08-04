@@ -1,4 +1,5 @@
 import PageShell from '@/components/PageShell';
+import PhotoGallery from '@/components/PhotoGallery';
 import { Camera, Newspaper, Youtube, Upload, FileText } from 'lucide-react';
 import { getRecentPhotos, getNewsletters } from '@/lib/photoStorage';
 import { parseDateString } from '@/lib/dateUtils';
@@ -49,29 +50,10 @@ export default function MediaPage() {
           </span>
         </div>
 
-        {/* Gallery grid */}
-        {galleryItems.length === 0 ? (
-          <div className="card text-center py-12">
-            <Camera className="w-12 h-12 text-field-green/30 mx-auto mb-3" />
-            <p className="font-display font-bold text-lg">No photos in the gallery yet</p>
-            <p className="text-sm text-ink-muted mt-1">
-              Approved member submissions appear here. Admins can add the first ones from the dashboard.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {galleryItems.map((item) => (
-              <a key={item.id} href={item.src} target="_blank" rel="noopener noreferrer" className="group">
-                <div className="aspect-square rounded-xl overflow-hidden bg-surface-muted border border-black/5 relative">
-                  <img src={item.src} alt={item.caption} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-                </div>
-                <p className="text-xs text-ink-muted mt-1.5 truncate">{item.caption}</p>
-                <p className="text-[11px] text-ink-light">{item.date}</p>
-              </a>
-            ))}
-          </div>
-        )}
+        {/* Grid plus in-page viewer. A client component so tapping a photo
+            opens it here rather than navigating to the raw image file, which
+            on a phone leaves no way back. */}
+        <PhotoGallery items={galleryItems} />
 
         {/* Submit photos prompt */}
         <div className="mt-8 bg-field-green/5 border border-field-green/20 rounded-xl p-6 flex flex-col sm:flex-row items-center gap-4">
