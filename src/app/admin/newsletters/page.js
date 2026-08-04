@@ -5,7 +5,7 @@ import Link from 'next/link';
 import AdminShell from '@/components/admin/AdminShell';
 import { useAuth } from '@/components/AuthProvider';
 import { readError } from '@/lib/apiClient';
-import { Newspaper, Trash2, Upload } from 'lucide-react';
+import { Newspaper, Trash2, Upload, Eye } from 'lucide-react';
 import { parseDateString } from '@/lib/dateUtils';
 
 const memberInputClass =

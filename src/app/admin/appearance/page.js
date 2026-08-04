@@ -80,6 +80,10 @@ export default function Page() {
     await refreshAdminData();
   };
 
+  // The hero section's JSX calls these slot-specific wrappers.
+  const uploadHeroImage = (file) => uploadSiteImage('hero', file);
+  const removeHeroImage = () => removeSiteImage('hero', 'Remove the homepage header image?');
+
   return (
     <AdminShell title="Logo & Images" subtitle="Club logo and the homepage header image">
       <>

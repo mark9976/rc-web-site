@@ -39,6 +39,8 @@ export default function Page() {
   const [closures, setClosures] = useState([]);
   const [closureDraft, setClosureDraft] = useState({ status: 'closed', reason: '', startsAt: '', endsAt: '' });
   const [closureError, setClosureError] = useState('');
+  // handleFieldStatus reports failures here.
+  const [uploadError, setUploadError] = useState('');
 
   const refreshAdminData = useCallback(async () => {
     const statusRes = await fetch('/api/field-status', { cache: 'no-store' });
@@ -112,6 +114,7 @@ export default function Page() {
   return (
     <AdminShell title="Field Status" subtitle="Open, closed or maintenance, plus scheduled closures">
       <>
+        {uploadError ? <p className="mb-4 text-sm text-red-600">{uploadError}</p> : null}
       <div className="grid gap-6 lg:grid-cols-2 mb-8">
 
         <aside className="card p-6">
