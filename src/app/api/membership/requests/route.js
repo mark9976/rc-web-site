@@ -1,6 +1,20 @@
 import { NextResponse } from 'next/server';
 import { getApplications, reviewApplication } from '@/lib/photoStorage';
 import { requireAdmin } from '@/lib/apiAuth';
+import { sendMemberWelcomeEmail } from '@/lib/email/memberWelcome';
+
+/**
+ * Public origin for the sign-in link in the email.
+ *
+ * Prefers the proxy's forwarded headers, because request.url resolves to the
+ * server's own address behind nginx and would produce a localhost link.
+ */
+function appOrigin(request) {
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
+  const proto = (request.headers.get('x-forwarded-proto') || '').split(',')[0].trim();
+  if (host) return `${proto || 'https'}://${host}`;
+  return new URL(request.url).origin;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -27,5 +41,26 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Application not found or already reviewed.' }, { status: 404 });
   }
 
-  return NextResponse.json({ result });
+  // Only an approval sends mail; a rejection tells the applicant nothing.
+  let email = null;
+  if (action === 'approve' && result.user) {
+    email = await sendMemberWelcomeEmail({
+      to: result.application.email,
+      name: result.user.name,
+      username: result.user.username,
+      password: result.temporaryPassword,
+      siteUrl: appOrigin(request),
+    });
+  }
+
+  // The password is handed back to the admin only when the email did not go
+  // out, so they can pass it on themselves. On success it is never echoed.
+  return NextResponse.json({
+    result: {
+      application: result.application,
+      user: result.user,
+      email,
+      temporaryPassword: email && !email.sent ? result.temporaryPassword : undefined,
+    },
+  });
 }

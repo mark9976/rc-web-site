@@ -10,11 +10,14 @@ import {
   serializeUser,
 } from '@/lib/photoStorage';
 import { OFFICER_TITLES } from '@/lib/clubConstants';
+import { generateTemporaryPassword } from '@/lib/password';
 import { requireAdmin, requireUser } from '@/lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TEMPORARY_PASSWORD = 'welcome';
+// Generated per reset rather than a shared word, for the same reason as the
+// membership approval: it is the only thing guarding the account until the
+// member sets their own.
 const LIMITS = { name: 120, username: 40, email: 160, phone: 40, address: 240, amaNumber: 20, instructorNote: 300 };
 
 function clean(value, limit) {
@@ -61,8 +64,10 @@ export async function PATCH(request) {
 
   // Admin-issued password reset, kept separate from ordinary profile edits.
   if (body.action === 'resetPassword') {
-    resetUserPassword(id, TEMPORARY_PASSWORD);
-    return NextResponse.json({ success: true, temporaryPassword: TEMPORARY_PASSWORD });
+    const temporaryPassword = generateTemporaryPassword();
+    resetUserPassword(id, temporaryPassword);
+    // Returned once so the admin can pass it on; only the hash is stored.
+    return NextResponse.json({ success: true, temporaryPassword });
   }
 
   const fields = {

@@ -266,12 +266,26 @@ export default function AdminPage() {
       setApplicationMessage('');
       return;
     }
-    setApplicationMessage(
-      result.user
-        ? `Approved ${result.user.name}. Username: ${result.user.username} — temporary password: welcome`
-        : 'Application approved.'
-    );
-    setApplicationError('');
+    if (!result.user) {
+      setApplicationMessage('Application approved.');
+      setApplicationError('');
+      await refreshAdminData();
+      return;
+    }
+
+    const who = `${result.user.name} (username: ${result.user.username})`;
+    if (result.email?.sent) {
+      setApplicationMessage(`Approved ${who}. Their login details were emailed to them.`);
+      setApplicationError('');
+    } else {
+      // The account exists either way, so show the password for hand-off
+      // rather than leaving the admin with no way to reach the new member.
+      setApplicationMessage(
+        `Approved ${who}, but the welcome email could not be sent${result.email?.reason ? `: ${result.email.reason}` : '.'} ` +
+        `Give them this temporary password yourself: ${result.temporaryPassword ?? '(unavailable)'}`
+      );
+      setApplicationError('');
+    }
     await refreshAdminData();
   };
 
@@ -1524,7 +1538,7 @@ export default function AdminPage() {
           )}
 
           <p className="mt-4 text-xs text-ink-light">
-            Approved applicants get a generated username and the temporary password <strong>welcome</strong>, which they must
+            Approved applicants get a generated username and a random one-time password, emailed to them, which they must
             change on first sign-in. Use <strong>Reset password</strong> to issue that temporary password again if a member is
             locked out.
           </p>

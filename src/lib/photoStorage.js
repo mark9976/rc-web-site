@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { normalizeDateString } from '@/lib/dateUtils';
-import { hashPassword } from '@/lib/password';
+import { hashPassword, generateTemporaryPassword } from '@/lib/password';
 import { OFFICER_TITLES, FLYING_SITES } from '@/lib/clubConstants';
 import { nextClubHour, clubParts } from '@/lib/clubTime';
 
@@ -801,6 +801,24 @@ export function insertApplication(application) {
   return getDb().prepare('SELECT * FROM member_applications WHERE id = ?').get(id);
 }
 
+/**
+ * Appends a number if the derived username is taken.
+ *
+ * `users.username` is UNIQUE, and two applicants with the same email local part
+ * (mark@gmail / mark@yahoo) would otherwise fail the insert at approval time.
+ */
+function uniqueUsername(base) {
+  const db = getDb();
+  const taken = (name) => db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(name);
+  if (!taken(base)) return base;
+
+  for (let suffix = 2; suffix < 100; suffix += 1) {
+    const candidate = `${base}${suffix}`;
+    if (!taken(candidate)) return candidate;
+  }
+  return `${base}${Date.now()}`;
+}
+
 export function reviewApplication(id, action) {
   const db = getDb();
   const application = db.prepare('SELECT * FROM member_applications WHERE id = ?').get(id);
@@ -811,14 +829,19 @@ export function reviewApplication(id, action) {
     .run(status, reviewedAt, 'admin', id);
 
   if (status === 'approved') {
-    const usernameBase = application.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase() || `member${Date.now()}`;
+    const usernameBase = uniqueUsername(
+      application.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase() || `member${Date.now()}`
+    );
     const userId = `member-${Date.now()}`;
+    // One-time and random rather than a shared word: it travels by email and
+    // is the only thing guarding the account until they set their own.
+    const temporaryPassword = generateTemporaryPassword();
     const user = {
       id: userId,
       username: usernameBase,
       name: application.name,
       role: 'member',
-      password: 'welcome',
+      password: temporaryPassword,
       needsPasswordReset: true,
       phone: application.phone,
       email: application.email,
@@ -828,7 +851,13 @@ export function reviewApplication(id, action) {
       createdAt: new Date().toISOString(),
     };
     createUser(user);
-    return { application: { ...application, status, reviewedAt }, user: serializeUser(user) };
+    // The plaintext password is returned exactly once, for the welcome email.
+    // createUser stores only the hash, so it cannot be recovered afterwards.
+    return {
+      application: { ...application, status, reviewedAt },
+      user: serializeUser(user),
+      temporaryPassword,
+    };
   }
   return { application: { ...application, status, reviewedAt } };
 }

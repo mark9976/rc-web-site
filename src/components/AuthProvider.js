@@ -136,7 +136,13 @@ export function AuthProvider({ children }) {
         body: JSON.stringify({ id: applicationId, action: 'approve' }),
       });
       await refreshApplications();
-      return { success: true, user: data.result?.user };
+      return {
+        success: true,
+        user: data.result?.user,
+        email: data.result?.email,
+        // Present only when the welcome email could not be sent.
+        temporaryPassword: data.result?.temporaryPassword,
+      };
     } catch (error) {
       return { error: error.message };
     }
