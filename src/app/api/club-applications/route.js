@@ -48,8 +48,11 @@ export async function POST(request) {
   const includesFamily = Boolean(body.includesFamily);
   const lateFee = Boolean(body.lateFee);
 
-  if (!fields.name || !fields.amaNumber || !fields.email) {
-    return NextResponse.json({ error: 'Name, AMA number and email are required.' }, { status: 400 });
+  // AMA number is optional here: applicants often join the club before they
+  // have one. The column is NOT NULL, and clean() yields '' rather than null,
+  // so a blank still satisfies the constraint.
+  if (!fields.name || !fields.email) {
+    return NextResponse.json({ error: 'Name and email are required.' }, { status: 400 });
   }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fields.email)) {
     return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 });

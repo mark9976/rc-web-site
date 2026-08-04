@@ -144,8 +144,8 @@ export default function MembershipApplicationPage() {
             <Label className="sm:col-span-2">Full name
               <input value={form.name} onChange={set('name')} className={field} required />
             </Label>
-            <Label>AMA number <span className="text-flyday-nogo">*</span>
-              <input value={form.amaNumber} onChange={set('amaNumber')} className={field} required />
+            <Label hint="(optional)">AMA number
+              <input value={form.amaNumber} onChange={set('amaNumber')} className={field} />
             </Label>
             <Label hint="(optional)">FAA / UAS number
               <input value={form.faaNumber} onChange={set('faaNumber')} className={field} />

@@ -144,7 +144,7 @@ export default function MembershipApplicationsPage() {
                         </span>
                       </span>
                       <span className="text-xs text-ink-muted block mt-0.5">
-                        AMA #{application.amaNumber} · {application.email} · submitted {formatSubmitted(application.submittedAt)}
+                        {application.amaNumber ? `AMA #${application.amaNumber} · ` : ''}{application.email} · submitted {formatSubmitted(application.submittedAt)}
                       </span>
                     </span>
                   </button>
