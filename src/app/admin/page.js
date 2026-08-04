@@ -67,6 +67,7 @@ export default function AdminPage() {
   const [newsletterError, setNewsletterError] = useState('');
   const [uploadingNewsletter, setUploadingNewsletter] = useState(false);
   const [heroImage, setHeroImage] = useState(null);
+  const [logoImage, setLogoImage] = useState(null);
   const [heroError, setHeroError] = useState('');
   const [uploadingHero, setUploadingHero] = useState(false);
 
@@ -125,7 +126,9 @@ export default function AdminPage() {
         fetch('/api/site-images', { cache: 'no-store' }),
       ]);
       if (imagesRes.ok) {
-        setHeroImage((await imagesRes.json()).images?.hero ?? null);
+        const images = (await imagesRes.json()).images ?? {};
+        setHeroImage(images.hero ?? null);
+        setLogoImage(images.logo ?? null);
       }
       if (closuresRes.ok) {
         setClosures((await closuresRes.json()).closures ?? []);
@@ -342,7 +345,8 @@ export default function AdminPage() {
     }
   };
 
-  const uploadHeroImage = async (file) => {
+  /** Shared by every site-image slot; `slot` decides which one is replaced. */
+  const uploadSiteImage = async (slot, file) => {
     if (!file) return;
     setHeroError('');
 
@@ -354,11 +358,11 @@ export default function AdminPage() {
     setUploadingHero(true);
     try {
       const body = new FormData();
-      body.append('slot', 'hero');
+      body.append('slot', slot);
       body.append('image', file);
 
       const res = await fetch('/api/site-images', { method: 'POST', body });
-      if (!res.ok) throw new Error(await readError(res, 'Unable to upload the header image.'));
+      if (!res.ok) throw new Error(await readError(res, 'Unable to upload the image.'));
       await refreshAdminData();
     } catch (error) {
       setHeroError(error.message);
@@ -367,15 +371,18 @@ export default function AdminPage() {
     }
   };
 
-  const removeHeroImage = async () => {
-    if (!window.confirm('Remove the homepage header image?')) return;
+  const removeSiteImage = async (slot, confirmMessage) => {
+    if (!window.confirm(confirmMessage)) return;
     await fetch('/api/site-images', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slot: 'hero' }),
+      body: JSON.stringify({ slot }),
     });
     await refreshAdminData();
   };
+
+  const uploadHeroImage = (file) => uploadSiteImage('hero', file);
+  const removeHeroImage = () => removeSiteImage('hero', 'Remove the homepage header image?');
 
   const uploadNewsletter = async (event) => {
     event.preventDefault();
@@ -655,6 +662,72 @@ export default function AdminPage() {
             ) : null}
           </div>
         </aside>
+      </div>
+
+      {/* ─── Club Logo ─── */}
+      <div className="card p-6 mb-8">
+        <div className="flex items-center gap-3 mb-4">
+          <ImageIcon className="w-6 h-6 text-field-green" />
+          <div>
+            <h3 className="font-display font-bold text-xl">Club Logo</h3>
+            <p className="text-sm text-ink-muted">
+              The crest in the site header. The phone app reads the same image, so replacing it here
+              updates both.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+          {/* Previewed on the dark green it actually sits on, so a logo with the
+              wrong background shows up here rather than in production. */}
+          <div className="shrink-0 rounded-2xl bg-field-darkgreen p-4 flex items-center justify-center w-32 h-32">
+            {logoImage ? (
+              <img
+                src={`/api/site-images/logo?v=${encodeURIComponent(logoImage.updatedAt)}`}
+                alt="Club logo"
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <ImageIcon className="w-8 h-8 text-white/30" />
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {logoImage ? (
+              <p className="text-xs text-ink-muted mb-3">
+                {formatFileSize(logoImage.byteSize)} · set by {logoImage.updatedBy} on{' '}
+                {formatTimestamp(logoImage.updatedAt)}
+              </p>
+            ) : (
+              <p className="text-xs text-ink-muted mb-3">No logo set — the header and the app will both show nothing.</p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <label className="btn-secondary text-xs cursor-pointer">
+                <Upload className="w-3.5 h-3.5" /> {logoImage ? 'Replace logo' : 'Upload logo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => uploadSiteImage('logo', event.target.files?.[0])}
+                />
+              </label>
+              {logoImage ? (
+                <button
+                  type="button"
+                  onClick={() => removeSiteImage('logo', 'Remove the club logo? The site header and the phone app will both lose it.')}
+                  className="inline-flex items-center gap-1 rounded-full bg-flyday-nogo/10 px-3 py-1 text-xs font-semibold text-flyday-nogo hover:bg-flyday-nogo/20"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Remove
+                </button>
+              ) : null}
+            </div>
+            <p className="text-xs text-ink-light mt-3">
+              A PNG with a transparent background works best. Served to both the site and the app at{' '}
+              <code className="rounded bg-surface-muted px-1">/api/site-images/logo</code>.
+            </p>
+          </div>
+        </div>
+        {heroError ? <p className="mt-4 text-sm text-red-600">{heroError}</p> : null}
       </div>
 
       {/* ─── Homepage Header Image ─── */}

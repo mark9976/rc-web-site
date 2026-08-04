@@ -29,7 +29,15 @@ export const CLASSIFIED_CATEGORIES = [
   'Other',
 ];
 
-export const SITE_IMAGE_SLOTS = ['hero'];
+/**
+ * Admin-replaceable images, served from the database at
+ * /api/site-images/<slot>.
+ *
+ * `logo` is the club crest. The iOS app's clubs.json points at
+ * /api/site-images/logo, so this is the single source of truth for the mark —
+ * the website and the app both read it from here.
+ */
+export const SITE_IMAGE_SLOTS = ['hero', 'logo'];
 
 export const CLASSIFIED_LIFETIME_DAYS = 90;
 

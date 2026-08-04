@@ -44,11 +44,41 @@ function seedInitialData(database) {
     insertEvent.run('event-4', 'Swap Meet', '2026-09-06', '09:00', '12:00', '9:00 AM – 12:00 PM', 'Mammoth Park Pavilion', 'Swap Meet', 'Buy, sell, and trade RC equipment.', 'admin', 'Club Admin', now, now);
   }
 
+  seedLogoImage(database);
+
   const statusCount = database.prepare('SELECT COUNT(*) AS count FROM field_status').get().count;
   if (statusCount === 0) {
     database.prepare(
       'INSERT INTO field_status (id, status, reason, updatedAt, updatedBy) VALUES (?, ?, ?, ?, ?)'
     ).run(1, 'open', '', new Date().toISOString(), 'system');
+  }
+}
+
+/**
+ * Loads the club crest into the `logo` slot from the copy shipped in the repo.
+ *
+ * The iOS app reads the logo from /api/site-images/logo, which is served out of
+ * the database — so a fresh deploy would 404 until somebody remembered to
+ * upload it. Seeding from the repo file means every instance has it on first
+ * start. Only fills an empty slot, so an admin upload is never overwritten.
+ */
+function seedLogoImage(database) {
+  const existing = database.prepare("SELECT 1 FROM site_images WHERE slot = 'logo'").get();
+  if (existing) return;
+
+  const logoPath = path.join(process.cwd(), 'public', 'lhmac-logo.png');
+  if (!fs.existsSync(logoPath)) return;
+
+  try {
+    const content = fs.readFileSync(logoPath);
+    database.prepare(
+      `INSERT INTO site_images (slot, filename, contentType, byteSize, updatedBy, updatedAt, content)
+       VALUES ('logo', 'lhmac-logo.png', 'image/png', ?, 'system', ?, ?)`
+    ).run(content.length, new Date().toISOString(), content);
+    console.log(`[site-images] seeded club logo (${content.length} bytes)`);
+  } catch (error) {
+    // A missing or unreadable logo must not stop the database opening.
+    console.error('[site-images] could not seed the club logo:', error.message);
   }
 }
 

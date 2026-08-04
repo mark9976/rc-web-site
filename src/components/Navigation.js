@@ -64,10 +64,12 @@ export default function Navigation() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 shrink-0">
-            {/* Club crest. Sized by height so the 117x144 portrait artwork keeps
-                its aspect ratio inside the 64px-tall bar. */}
+            {/* Served from the database rather than the static file, so the
+                site shows the same crest the iOS app fetches and an admin can
+                replace both at once. Sized by height so the portrait artwork
+                keeps its aspect ratio in the 64px bar. */}
             <img
-              src="/lhmac-logo.png"
+              src="/api/site-images/logo"
               alt="Laurel Highlands Model Airplane Club"
               width={117}
               height={144}
