@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import Link from 'next/link';
 import PageShell from '@/components/PageShell';
-import { CalendarDays, MapPin, Clock, Users, Edit, Plus, ShieldCheck, User, Trash2 } from 'lucide-react';
+import { CalendarDays, MapPin, Clock, Users, Edit, Plus, ShieldCheck, User, Trash2, ExternalLink, Link as LinkIcon, Upload, Image as ImageIcon } from 'lucide-react';
 import { formatDateDisplay, normalizeDateString } from '@/lib/dateUtils';
 import { readError } from '@/lib/apiClient';
 
@@ -38,6 +38,7 @@ function createEmptyEvent(user) {
     location: '',
     type: 'Meeting',
     desc: '',
+    link: '',
     ownerId: user.id,
     ownerName: user.name,
   };
@@ -121,6 +122,8 @@ export default function EventsPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState(createEmptyEvent(activeUser));
   const [error, setError] = useState('');
+  const [photoFile, setPhotoFile] = useState(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
 
   useEffect(() => {
     const loadEvents = async () => {
@@ -164,12 +167,16 @@ export default function EventsPage() {
   }, [events]);
 
   const startNewEvent = () => {
+    setPhotoFile(null);
+    setRemovePhoto(false);
     setDraft(createEmptyEvent(activeUser));
     setEditorOpen(true);
     setError('');
   };
 
   const startEditEvent = (event) => {
+    setPhotoFile(null);
+    setRemovePhoto(false);
     setDraft(normalizeEvent(event));
     setEditorOpen(true);
     setError('');
@@ -187,20 +194,20 @@ export default function EventsPage() {
     }
 
     const timeString = formatTimeDisplay(draft.startTime, draft.endTime);
-    const normalizedDraft = {
-      ...draft,
-      date: draft.date,
-      startTime: draft.startTime,
-      endTime: draft.endTime,
-      time: timeString,
-    };
+
+    // Sent as multipart so an optional poster image can ride along with the
+    // fields. The API still accepts JSON for callers that send no image.
+    const body = new FormData();
+    for (const [key, value] of Object.entries({ ...draft, time: timeString })) {
+      if (value !== null && value !== undefined && typeof value !== 'object') {
+        body.append(key, value);
+      }
+    }
+    if (photoFile) body.append('photo', photoFile);
+    if (removePhoto) body.set('removePhoto', 'true');
 
     try {
-      const res = await fetch('/api/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(normalizedDraft),
-      });
+      const res = await fetch('/api/events', { method: 'POST', body });
       if (!res.ok) {
         throw new Error(await readError(res, 'Unable to save event.'));
       }
@@ -456,6 +463,66 @@ export default function EventsPage() {
                 className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
               />
             </label>
+
+            <label className="block lg:col-span-2">
+              <span className="text-sm font-medium text-ink">Event website (optional)</span>
+              <input
+                type="url"
+                inputMode="url"
+                value={draft.link ?? ''}
+                onChange={(event) => setDraft({ ...draft, link: event.target.value })}
+                placeholder="https://example.com/fun-fly"
+                className="mt-2 w-full rounded-3xl border border-black/10 bg-surface-card px-4 py-3 text-sm outline-none focus:border-field-green focus:ring-2 focus:ring-field-green/10"
+              />
+              <span className="mt-1 block text-xs text-ink-light">
+                Adds a &ldquo;Details&rdquo; button to the event. Leave blank if there is no page.
+              </span>
+            </label>
+
+            <div className="block lg:col-span-2">
+              <span className="text-sm font-medium text-ink">Flyer or photo (optional)</span>
+              <div className="mt-2 flex flex-wrap items-center gap-4">
+                {/* Shows the newly picked file if there is one, otherwise
+                    whatever is already stored for this event. */}
+                {(photoFile || (draft.hasPhoto && !removePhoto)) ? (
+                  <img
+                    src={photoFile ? URL.createObjectURL(photoFile) : `/api/events/photo/${encodeURIComponent(draft.id)}`}
+                    alt=""
+                    className="h-20 w-20 rounded-2xl object-cover border border-black/10"
+                  />
+                ) : (
+                  <div className="h-20 w-20 rounded-2xl border border-dashed border-black/15 bg-surface-muted flex items-center justify-center">
+                    <ImageIcon className="w-6 h-6 text-ink-light/40" />
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-3">
+                  <label className="btn-secondary text-xs cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" /> {photoFile || draft.hasPhoto ? 'Change image' : 'Add image'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        setPhotoFile(event.target.files?.[0] ?? null);
+                        setRemovePhoto(false);
+                      }}
+                    />
+                  </label>
+                  {(photoFile || (draft.hasPhoto && !removePhoto)) ? (
+                    <button
+                      type="button"
+                      onClick={() => { setPhotoFile(null); setRemovePhoto(true); }}
+                      className="inline-flex items-center gap-1 rounded-full bg-flyday-nogo/10 px-3 py-1 text-xs font-semibold text-flyday-nogo hover:bg-flyday-nogo/20"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Remove
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {removePhoto ? (
+                <span className="mt-2 block text-xs text-flyday-nogo">Image will be removed when you save.</span>
+              ) : null}
+            </div>
           </div>
           {/* Pinned below the scroll area: Save is visible without scrolling,
               whatever the form's height. pb-safe keeps it clear of the iPhone
@@ -483,23 +550,61 @@ export default function EventsPage() {
         {sortedEvents.map((event) => {
           const editable = canEditEvent(event, activeUser);
           return (
-            <div key={event.id} className="card hover:shadow-md transition-shadow group">
+            <div
+              key={event.id}
+              className={`card hover:shadow-md transition-shadow group ${
+                event.link ? 'border-l-4 border-l-sky-deep' : ''
+              }`}
+            >
               <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                 <div className="sm:w-32 shrink-0">
                   <p className="font-display font-bold text-lg text-ink">{formatDateDisplay(event.date)}</p>
                   <p className="text-xs text-ink-muted">{event.time}</p>
                 </div>
+
+                {/* Poster thumbnail, only rendered when the event has one so the
+                    layout never reserves empty space. */}
+                {event.hasPhoto ? (
+                  <a
+                    href={`/api/events/photo/${encodeURIComponent(event.id)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 self-start"
+                    title="View full size"
+                  >
+                    <img
+                      src={`/api/events/photo/${encodeURIComponent(event.id)}`}
+                      alt={`Flyer for ${event.title}`}
+                      loading="lazy"
+                      className="h-24 w-24 sm:h-28 sm:w-28 rounded-2xl object-cover border border-black/10 transition-transform hover:scale-[1.03]"
+                    />
+                  </a>
+                ) : null}
+
                 <div className="flex-1">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <span className={`inline-block text-xs font-display font-bold uppercase tracking-wider px-2 py-1 rounded mb-2 ${typeColors[event.type] || 'bg-surface-muted text-ink-muted'}`}>
                         {event.type}
                       </span>
-                      <h3 className="font-display font-bold text-xl text-ink group-hover:text-field-green transition-colors">
+                      <h3 className="font-display font-bold text-xl text-ink group-hover:text-field-green transition-colors flex items-center gap-2">
                         {event.title}
+                        {event.link ? (
+                          <LinkIcon className="w-4 h-4 text-sky-deep shrink-0" aria-label="This event has a website" />
+                        ) : null}
                       </h3>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
+                      {event.link ? (
+                        <a
+                          href={event.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-sky-deep px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> Details
+                        </a>
+                      ) : null}
                       <span className="rounded-full bg-surface-card px-3 py-1 text-xs text-ink-muted">By {event.ownerName}</span>
                       {editable ? (
                         <button

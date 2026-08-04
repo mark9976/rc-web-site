@@ -347,6 +347,10 @@ function runMigrations(database) {
   addColumn('users', 'isInstructor', 'INTEGER DEFAULT 0');
   addColumn('users', 'instructorNote', 'TEXT');
   addColumn('users', 'officerTitle', 'TEXT');
+  // Optional poster/photo and an external link for an event.
+  addColumn('events', 'photo', 'BLOB');
+  addColumn('events', 'photoFilename', 'TEXT');
+  addColumn('events', 'link', 'TEXT');
   addColumn('lesson_requests', 'scheduledDate', 'TEXT');
   // Set when the requester was signed in, so the app can notify them. The
   // public form allows anonymous requests, which leave this null.
@@ -769,32 +773,72 @@ export function reviewApplication(id, action) {
   return { application: { ...application, status, reviewedAt } };
 }
 
+// The photo blob is deliberately excluded: a SELECT * here would ship every
+// event poster on every calendar load. `hasPhoto` is enough for the UI to know
+// whether to request /api/events/photo/<id>.
+const EVENT_COLUMNS = `
+  id, title, date, startTime, endTime, time, location, type, desc,
+  ownerId, ownerName, link, photoFilename, createdAt, updatedAt,
+  CASE WHEN photo IS NULL THEN 0 ELSE 1 END AS hasPhoto`;
+
+function toEvent(event) {
+  if (!event) return event;
+  return { ...event, date: normalizeDateString(event.date), hasPhoto: Boolean(event.hasPhoto) };
+}
+
 export function getEvents() {
   return getDb()
-    .prepare('SELECT * FROM events ORDER BY date ASC, startTime ASC')
+    .prepare(`SELECT ${EVENT_COLUMNS} FROM events ORDER BY date ASC, startTime ASC`)
     .all()
-    .map((event) => ({ ...event, date: normalizeDateString(event.date) }));
+    .map(toEvent);
 }
 
 export function getEventById(id) {
-  const event = getDb().prepare('SELECT * FROM events WHERE id = ?').get(id);
-  return event ? { ...event, date: normalizeDateString(event.date) } : event;
+  return toEvent(getDb().prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE id = ?`).get(id));
 }
 
+export function getEventPhoto(id) {
+  return getDb().prepare('SELECT photo, photoFilename FROM events WHERE id = ?').get(id);
+}
+
+/**
+ * Creates or updates an event.
+ *
+ * `photo` is only written when a new one is supplied, so editing an event
+ * without re-picking the file keeps the existing image. Pass
+ * `removePhoto: true` to clear it deliberately.
+ */
 export function upsertEvent(event) {
   const db = getDb();
   const normalizedDate = normalizeDateString(event.date);
   const existing = getEventById(event.id);
   const now = new Date().toISOString();
+  const link = event.link || null;
+
   if (existing) {
     db.prepare(
-      'UPDATE events SET title = ?, date = ?, startTime = ?, endTime = ?, time = ?, location = ?, type = ?, desc = ?, ownerId = ?, ownerName = ?, updatedAt = ? WHERE id = ?'
-    ).run(event.title, normalizedDate, event.startTime, event.endTime, event.time, event.location, event.type, event.desc, event.ownerId, event.ownerName, now, event.id);
+      `UPDATE events SET title = ?, date = ?, startTime = ?, endTime = ?, time = ?, location = ?,
+         type = ?, desc = ?, ownerId = ?, ownerName = ?, link = ?, updatedAt = ? WHERE id = ?`
+    ).run(event.title, normalizedDate, event.startTime, event.endTime, event.time, event.location, event.type, event.desc, event.ownerId, event.ownerName, link, now, event.id);
+
+    if (event.removePhoto) {
+      db.prepare('UPDATE events SET photo = NULL, photoFilename = NULL WHERE id = ?').run(event.id);
+    } else if (event.photo) {
+      db.prepare('UPDATE events SET photo = ?, photoFilename = ? WHERE id = ?')
+        .run(event.photo, event.photoFilename, event.id);
+    }
     return getEventById(event.id);
   }
+
   db.prepare(
-    'INSERT INTO events (id, title, date, startTime, endTime, time, location, type, desc, ownerId, ownerName, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(event.id, event.title, normalizedDate, event.startTime, event.endTime, event.time, event.location, event.type, event.desc, event.ownerId, event.ownerName, now, now);
+    `INSERT INTO events (id, title, date, startTime, endTime, time, location, type, desc,
+       ownerId, ownerName, link, photo, photoFilename, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    event.id, event.title, normalizedDate, event.startTime, event.endTime, event.time,
+    event.location, event.type, event.desc, event.ownerId, event.ownerName, link,
+    event.photo ?? null, event.photoFilename ?? null, now, now
+  );
   return getEventById(event.id);
 }
 
