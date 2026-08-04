@@ -86,6 +86,16 @@ export default function ComposeForm({ mailboxes, mailboxId, draft, onSent, onCan
         throw new Error(message || 'Send failed.');
       }
 
+      // A send can succeed overall while the server still refuses some
+      // recipients; say so rather than closing as if everything went out.
+      const result = await res.json().catch(() => ({}));
+      if (result.warning) {
+        setError(result.warning);
+        setStatus('idle');
+        onSent?.();
+        return;
+      }
+
       setStatus('idle');
       onSent?.();
     } catch (sendError) {

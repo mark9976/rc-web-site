@@ -57,6 +57,18 @@ export const POST = handler(async ({ request }) => {
     to, cc, bcc, subject, html: bodyHtml, inReplyTo, references, attachments,
   });
 
+  // nodemailer resolves even when the server refused some recipients, listing
+  // them in `rejected`. Without this check a refused message still lands in
+  // Sent and looks delivered.
+  const accepted = result.accepted ?? [];
+  const rejected = result.rejected ?? [];
+  if (accepted.length === 0) {
+    return fail(
+      `The mail server accepted no recipients${rejected.length ? `: ${rejected.join(', ')}` : '.'}`,
+      502
+    );
+  }
+
   // Record our own copy in Sent; the IMAP sync would eventually pick it up, but
   // the message should appear in the UI immediately.
   const sentAt = new Date().toISOString();
@@ -94,5 +106,14 @@ export const POST = handler(async ({ request }) => {
     }))
   );
 
-  return ok({ sent: true, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected });
+  return ok({
+    sent: true,
+    messageId: result.messageId,
+    accepted,
+    rejected,
+    // Surfaced so a partial refusal is visible rather than silent.
+    warning: rejected.length
+      ? `Delivered to ${accepted.length} recipient(s); the server refused: ${rejected.join(', ')}`
+      : null,
+  });
 });

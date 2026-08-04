@@ -251,6 +251,42 @@ function getDb() {
       content BLOB
     )`).run();
 
+    // The full club membership application (the paper form, online).
+    // Distinct from member_applications, which is only a request for a website
+    // login — this one carries dues, family members and the signed waiver.
+    db.prepare(`CREATE TABLE IF NOT EXISTS club_applications (
+      id TEXT PRIMARY KEY,
+      applicationType TEXT,
+      name TEXT NOT NULL,
+      amaNumber TEXT NOT NULL,
+      faaNumber TEXT,
+      address TEXT,
+      city TEXT,
+      state TEXT,
+      zip TEXT,
+      homePhone TEXT,
+      mobilePhone TEXT,
+      email TEXT NOT NULL,
+      dateOfBirth TEXT,
+      familyMembers TEXT,
+      emergencyName TEXT,
+      emergencyPhone TEXT,
+      membershipClass TEXT,
+      includesFamily INTEGER DEFAULT 0,
+      lateFee INTEGER DEFAULT 0,
+      duesTotal INTEGER,
+      signature TEXT,
+      guardianSignature TEXT,
+      signedAt TEXT,
+      status TEXT DEFAULT 'new',
+      adminNotes TEXT,
+      submittedAt TEXT,
+      reviewedAt TEXT,
+      reviewedBy TEXT
+    )`).run();
+
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_club_applications_status ON club_applications(status, submittedAt DESC)').run();
+
     // Small key/value store for admin-configurable site settings.
     db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
@@ -752,6 +788,99 @@ export function getClubConfig() {
     stats: { memberCount, instructorCount },
     officers: getOfficers().map((officer) => ({ name: officer.name, title: officer.officerTitle })),
   };
+}
+
+// ---- club membership applications -----------------------------------------
+
+function toClubApplication(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    familyMembers: unjsonArray(row.familyMembers),
+    includesFamily: Boolean(row.includesFamily),
+    lateFee: Boolean(row.lateFee),
+  };
+}
+
+function unjsonArray(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getClubApplications({ status = null } = {}) {
+  const db = getDb();
+  const rows = status
+    ? db.prepare('SELECT * FROM club_applications WHERE status = ? ORDER BY submittedAt DESC').all(status)
+    : db.prepare('SELECT * FROM club_applications ORDER BY submittedAt DESC').all();
+  return rows.map(toClubApplication);
+}
+
+export function getClubApplicationById(id) {
+  return toClubApplication(getDb().prepare('SELECT * FROM club_applications WHERE id = ?').get(id));
+}
+
+export function insertClubApplication(application) {
+  const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  getDb()
+    .prepare(
+      `INSERT INTO club_applications
+        (id, applicationType, name, amaNumber, faaNumber, address, city, state, zip,
+         homePhone, mobilePhone, email, dateOfBirth, familyMembers, emergencyName, emergencyPhone,
+         membershipClass, includesFamily, lateFee, duesTotal, signature, guardianSignature,
+         signedAt, status, submittedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)`
+    )
+    .run(
+      id,
+      application.applicationType,
+      application.name,
+      application.amaNumber,
+      application.faaNumber || null,
+      application.address || null,
+      application.city || null,
+      application.state || null,
+      application.zip || null,
+      application.homePhone || null,
+      application.mobilePhone || null,
+      application.email,
+      application.dateOfBirth || null,
+      JSON.stringify(application.familyMembers || []),
+      application.emergencyName || null,
+      application.emergencyPhone || null,
+      application.membershipClass,
+      application.includesFamily ? 1 : 0,
+      application.lateFee ? 1 : 0,
+      application.duesTotal,
+      application.signature,
+      application.guardianSignature || null,
+      new Date().toISOString(),
+      new Date().toISOString()
+    );
+  return getClubApplicationById(id);
+}
+
+export function updateClubApplicationStatus(id, status, { reviewedBy, adminNotes } = {}) {
+  getDb()
+    .prepare(
+      `UPDATE club_applications
+       SET status = ?, reviewedAt = ?, reviewedBy = ?, adminNotes = COALESCE(?, adminNotes)
+       WHERE id = ?`
+    )
+    .run(status, new Date().toISOString(), reviewedBy || null, adminNotes ?? null, id);
+  return getClubApplicationById(id);
+}
+
+export function deleteClubApplication(id) {
+  return getDb().prepare('DELETE FROM club_applications WHERE id = ?').run(id);
+}
+
+export function countNewClubApplications() {
+  return getDb().prepare("SELECT COUNT(*) AS count FROM club_applications WHERE status = 'new'").get().count;
 }
 
 // ---- app settings ---------------------------------------------------------

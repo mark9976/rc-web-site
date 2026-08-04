@@ -101,3 +101,25 @@ to sign in and consent, then returned to the settings page with the mailbox adde
 | IMAP `AUTHENTICATE failed` after a successful sign-in | Graph scopes used instead of `outlook.office365.com` ones. |
 | No refresh token returned | `offline_access` missing from the app registration. |
 | `invalid_client` | Secret **ID** was copied instead of the secret **Value**, or the secret expired. |
+| Mail **arrives** but nothing **sends** (`535 5.7.139 SmtpClientAuthentication is disabled`) | SMTP AUTH is off. See below — this is separate from IMAP and from OAuth. |
+
+## Sending: SMTP AUTH has to be switched on separately
+
+Reading mail working does **not** mean sending will. Microsoft 365 disables SMTP client
+authentication by default, at both tenant and mailbox level, and the OAuth token alone does not
+override it. A mailbox can sync perfectly over IMAP and still refuse every send.
+
+Symptoms: the mailbox looks healthy, sync is current, but member welcome emails and blasts fail with
+`535 5.7.139 Authentication unsuccessful, SmtpClientAuthentication is disabled for the Tenant`.
+
+Enable it in two places:
+
+1. **Tenant** — Microsoft 365 admin centre → *Settings → Org settings → Modern authentication* →
+   tick **Authenticated SMTP**.
+2. **Mailbox** — in Exchange Online PowerShell:
+   ```powershell
+   Set-CASMailbox -Identity newsletter@lhmac.org -SmtpClientAuthenticationDisabled $false
+   ```
+
+Changes can take up to an hour to apply. Verify with **Admin → New Member Emails → Send test**,
+which sends a sample welcome email and reports the exact SMTP error if it fails.

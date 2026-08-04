@@ -4,7 +4,8 @@ import { useState } from 'react';
 import PageShell from '@/components/PageShell';
 import { useAuth } from '@/components/AuthProvider';
 import LessonRequestForm from './LessonRequestForm';
-import { UserPlus, GraduationCap, ShieldCheck, Mail, Home, CalendarDays, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
+import { ClipboardList, UserPlus, GraduationCap, ShieldCheck, Mail, Home, CalendarDays, ExternalLink } from 'lucide-react';
 
 const initialForm = {
   name: '',
@@ -183,6 +184,26 @@ export default function MembershipPage() {
         <p className="text-sm text-ink-muted leading-relaxed">
           If you already have a username and password, use the login page to sign in instead of submitting a new request.
         </p>
+      </div>
+
+      {/* The full club application, distinct from the website-access request
+          above: this one carries dues and the signed acceptance statement. */}
+      <div className="card mt-8 border-l-4 border-l-field-green">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <ClipboardList className="w-6 h-6 text-field-green" />
+              <h2 className="section-heading">Join the Club</h2>
+            </div>
+            <p className="text-ink-muted leading-relaxed">
+              Applying for club membership for the first time, or renewing for the year? Complete the
+              membership application online — it works out your dues and sends it to the club.
+            </p>
+          </div>
+          <Link href="/membership/apply/" className="btn-primary text-sm shrink-0 justify-center">
+            Membership Application
+          </Link>
+        </div>
       </div>
 
       <div className="card mt-8">

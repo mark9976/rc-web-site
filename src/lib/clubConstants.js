@@ -18,6 +18,37 @@ export const OFFICER_TITLES = [
   'Webmaster',
 ];
 
+/**
+ * Club dues, from the paper application (rev 10/2021).
+ *
+ * Amounts are whole dollars. Keep these in step with the printed form — the
+ * online application shows the same figures and totals them the same way.
+ */
+export const MEMBERSHIP_CLASSES = [
+  { value: 'regular', label: 'Regular — age 19 to 64', amount: 40 },
+  { value: 'youth', label: 'Youth (Jr.) — under 19', amount: 20 },
+  { value: 'senior', label: 'Senior / Retiree — age 65 or any pension', amount: 30 },
+];
+
+export const FAMILY_ADD_ON = 5;   // spouse and children under 19
+export const LATE_FEE = 10;       // renewals after 31 December
+
+export const CLUB_TREASURER = {
+  name: 'Rene Marquis',
+  address: '158 Frothingham Ave, Jeannette, PA 15644-1868',
+  phone: '724-216-8327',
+};
+
+/** Verbatim from the paper form; this is a liability waiver, so do not reword. */
+export const ACCEPTANCE_STATEMENT =
+  'If accepted into Laurel Highlands Model Airplane Club (LHMAC), I agree to serve as an officer if ' +
+  'nominated, participate in club field maintenance, and comply with all county, LHMAC & Academy of ' +
+  'Model Aeronautics (AMA) field and safety regulations. I am aware that modeling may present hazards ' +
+  'and I accept and relieve the Laurel Highlands Model Airplane Club, Inc., its officers, and members ' +
+  'from all liabilities for personal injury, property damage, or wrongful death caused by negligence.';
+
+export const CLUB_APPLICATION_STATUSES = ['new', 'approved', 'paid', 'rejected'];
+
 export const CLASSIFIED_TYPES = ['For Sale', 'Wanted'];
 
 export const CLASSIFIED_CATEGORIES = [
